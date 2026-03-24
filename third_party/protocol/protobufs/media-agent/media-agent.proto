@@ -1,0 +1,136 @@
+// ─────────────────────────────────────────────────────────
+// media-agent.proto
+// 版本号见 version.proto
+//
+//
+// Socket 传输说明（本地 socket，字节流，需要分帧）：
+// 每个帧格式如下：
+//   1. 4 字节 Magic Number：0xDEADBEEF
+//   2. 4 字节 Protobuf 数据长度（uint32），大端序（网络字节序）
+//   3. Protobuf 数据（序列化后的消息，例如 Envelope）
+//
+// 注意：Magic 和长度字段属于传输层帧头，不属于 Protobuf 消息本身。
+// 接收端应先读满 8 字节帧头，校验 magic，再按长度读取完整 payload 后进行解析。
+// ─────────────────────────────────────────────────────────
+
+syntax = "proto3";
+package media_agent;
+option go_package = "server_demo/pb";
+
+import "version.proto";
+import "types.proto";
+
+// ── 消息信封（Socket 传输单元）────────────────────────────
+enum MessageType {
+    MSG_UNKNOWN    = 0; // 未知
+    MSG_HEARTBEAT  = 1; // 心跳
+    MSG_CONFIG     = 2; // 下发配置
+    MSG_CONFIG_ACK = 3; // 配置响应
+    MSG_DETECTION  = 4; // 检测结果帧
+    MSG_ALARM      = 5; // 报警上报
+}
+
+message Envelope {
+    ProtoVersion version     = 1; // 协议版本号，见 version.proto
+    MessageType type         = 2; // 消息类型
+    uint32      seq          = 3; // 序列号
+    
+    oneof body {
+        HeartBeat      heartbeat   = 10;
+        AgentConfig    config      = 11;
+        ConfigAck      config_ack  = 12;
+        DetectionFrame detection   = 13;
+        AlarmInfo      alarm       = 14;
+    }
+}
+
+// ── 单个目标 ──────────────────────────────────────────────
+message DetectionObject {
+    int32         object_id  = 1; // 跟踪 ID（-1 表示无跟踪）
+    DetectionType type       = 2; // 检测类型
+    float         confidence = 3; // 置信度 [0,1]
+    Box           bbox       = 4; // 检测框
+}
+
+// ── 单帧检测结果 ──────────────────────────────────────────
+message DetectionFrame {
+    string   stream_id      = 1; // 视频流 ID（唯一标识）
+    int64    timestamp_ms   = 2; // 帧时间戳（毫秒 Unix）
+    int64    frame_index    = 3; // 帧序号
+    int32    frame_width    = 4; // 原始帧宽
+    int32    frame_height   = 5; // 原始帧高
+    repeated DetectionObject objects = 6; // 检测到的目标列表
+    string   algorithm_id   = 7; // 使用的算法标识
+    float    inference_ms   = 8; // 推理耗时（毫秒）
+}
+
+// ── 批量检测结果 ──────────────────────────────────────────
+message DetectionBatch {
+    repeated DetectionFrame frames = 1;
+}
+
+// ── 心跳消息 ──────────────────────────────────────────────
+message HeartBeat {
+    string agent_id  = 1;
+    int64  uptime_s  = 2;
+    int32  stream_count = 3;
+}
+
+// ── 配置下发（包含 ROI + 目标类型过滤）────────────────────
+// 算法配置块
+message AlgorithmConfig {
+    string algorithm_id = 1; // 算法唯一标识，由上级平台维护
+    string model_path   = 2; // 模型文件路径
+    float  threshold    = 3; // 默认阈值 [0,1]，可以被 per_type_threshold 覆盖
+    int32  alarm_level  = 4; // 报警等级：1=提示 2=告警 3=重要 4=紧急
+    // 算法启用日期范围，空=每天
+    int64 start_date = 5; // (秒，Unix 时间戳)
+    int64 end_date   = 6; // (秒，Unix 时间戳)
+
+    // ROI（支持多个区域）
+    repeated RoiArea rois = 10;
+
+    // 感兴趣目标类型/过滤策略
+    TargetFilter target_filter = 11;
+}
+
+// 视频流配置
+message StreamConfig {
+    bool  enabled = 1; // 是否启用
+    string stream_id = 2; // 流 ID, 唯一标识，由上级平台维护
+    string rtsp_url  = 3; // 原始 rtsp 拉流地址
+    string new_rtsp_url = 4; // 新 rtsp 推流地址
+    int32  reconnect_interval_s = 5; // 断线重连间隔（秒），无限次重连，0=禁用
+    string alarm_snapshot_dir = 6; // 报警截图目录，建议使用绝对路径，为空表示禁用
+    string alarm_record_dir   = 7; // 报警录像目录，建议使用绝对路径，为空表示禁用
+    int32 alarm_record_duration_s = 8; // 报警录像时长（秒）
+
+    repeated AlgorithmConfig algorithms = 10;
+}
+
+// 配置下发
+message AgentConfig {
+    string agent_id = 1; // 目标 agent ID（空=广播）
+    repeated StreamConfig streams = 2;
+}
+
+// 配置响应
+message ConfigAck {
+    string agent_id       = 1;
+    bool   success        = 2;
+    string message        = 3;
+}
+
+// ── 报警上报 ──────────────────────────────────────────────
+message AlarmInfo {
+    string alarm_id       = 1; // 报警唯一 ID（UUID）
+    string stream_id      = 2; // 触发报警的流 ID
+    int64  timestamp_ms   = 3; // 报警时间戳（毫秒 Unix）
+    string alarm_type     = 4; // 报警类型（如 "intrusion", "fire"）
+    int32  level          = 5; // 报警等级：1=提示 2=告警 3=重要 4=紧急
+    float  confidence     = 6; // 触发置信度
+    DetectionObject target = 7; // 触发目标
+    string description    = 8; // 描述信息
+    string snapshot_name  = 9; // 截图文件名（可选）
+    string record_name    = 10; // 视频片段文件名（可选）
+}

@@ -1,0 +1,27 @@
+// ─────────────────────────────────────────────────────────
+// version.proto  —  Single Source of Truth for protocol version
+//
+// 版本编码规则：major * 10000 + minor * 100 + patch
+//   示例：1.2.3  →  10203
+//         2.0.1  →  20001
+// ─────────────────────────────────────────────────────────
+
+syntax = "proto3";
+package media_agent;
+option go_package = "server_demo/pb";
+
+// 编译后各语言使用方式：
+//
+// C++（等同于宏定义，编译期常量）：
+//   media_agent::PROTO_VERSION_CURRENT          // 10000
+//   media_agent::PROTO_VERSION_CURRENT / 10000  // major = 1
+//
+// Go（类型化常量）：
+//   pb.ProtoVersion_PROTO_VERSION_CURRENT          // 10000
+//   int(pb.ProtoVersion_PROTO_VERSION_CURRENT) / 10000  // major = 1
+//
+enum ProtoVersion {
+    PROTO_VERSION_UNSPECIFIED = 0;
+    PROTO_VERSION_CURRENT     = 10400; // 1.4.0
+}
+

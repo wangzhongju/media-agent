@@ -1,0 +1,15 @@
+{
+    "model_name": "hardhat_detect_yolov8s.rknn",
+    "model_path": "",
+    "model_type": "yolov8_det",
+    "num_class": 2,
+    "class_names": ["hat", "person"],
+    "input_w": 512,
+    "input_h": 512,
+    "conf_thresh": 0.25,
+    "iou_thresh": 0.45,
+    "topk": 100,
+    "device_id": 0,
+    "device": "gpu",
+    "backend": "rknn"
+}

@@ -1,0 +1,22 @@
+{
+  "log": {
+    "level": "info",
+    "log_dir": "./log/",
+    "max_file_mb": 50,
+    "max_files": 5
+  },
+
+  "socket": {
+    "socket_path": "/tmp/media_agent.sock",
+    "send_queue_size": 100,
+    "heartbeat_interval_s": 10,
+    "agent_id": "agent_001"
+  },
+
+  "pipeline": {
+    "num_infer_threads": 3,
+    "frame_queue_size": 200,
+    "statistics_interval_s": 5
+  }
+}
+
