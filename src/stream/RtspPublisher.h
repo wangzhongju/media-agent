@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pipeline/StreamTypes.h"
+#include "stream/Utils.h"
 
 #include <cstdint>
 #include <memory>
@@ -13,19 +14,6 @@ struct AVFormatContext;
 struct AVStream;
 
 namespace media_agent {
-
-struct RtspStreamSpec {
-    MediaType             media_type = MediaType::Video;
-    int                   input_stream_index = -1;
-    int                   codec_id = 0;
-    int                   time_base_num = 1;
-    int                   time_base_den = 1000;
-    int                   width = 0;
-    int                   height = 0;
-    int                   sample_rate = 0;
-    int                   channels = 0;
-    std::vector<uint8_t>  extradata;
-};
 
 class RtspPublisher {
 public:
@@ -45,13 +33,6 @@ public:
     void close();
 
 private:
-    struct StreamState {
-        int       input_stream_index = -1;
-        int       input_time_base_num = 1;
-        int       input_time_base_den = 1000;
-        AVStream* output_stream = nullptr;
-    };
-
     bool openLocked();
     bool writePacketLocked(const EncodedPacket& packet,
                            const std::shared_ptr<AVPacket>& source_packet);
@@ -61,7 +42,7 @@ private:
     std::string stream_id_;
     std::string output_url_;
     std::vector<RtspStreamSpec> input_streams_;
-    std::unordered_map<int, StreamState> streams_;
+    std::unordered_map<int, OutputStreamState> streams_;
     AVFormatContext* format_context_ = nullptr;
     bool configured_ = false;
 };

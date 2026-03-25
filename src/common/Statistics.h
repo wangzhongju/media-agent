@@ -23,12 +23,18 @@ public:
     void incRtspPullFrame(const std::string& stream_id, uint64_t n = 1);
     void incMppDecodeFrame(const std::string& stream_id, uint64_t n = 1);
     void incInferFrame(const std::string& stream_id, uint64_t n = 1);
+    void incPublishFrame(const std::string& stream_id, uint64_t n = 1);
+    void setRemainPacketSize(const std::string& stream_id, uint64_t size);
+    void setRemainFrameSize(const std::string& stream_id, uint64_t size);
 
 private:
     struct Counters {
         uint64_t rtsp_pull_frames = 0;
         uint64_t mpp_decode_frames = 0;
         uint64_t infer_frames = 0;
+        uint64_t publish_frames = 0;
+        uint64_t remain_packet_size = 0;
+        uint64_t remain_frame_size = 0;
     };
 
     Statistics() = default;

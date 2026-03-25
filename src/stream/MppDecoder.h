@@ -4,6 +4,7 @@
 #include <vector>
 
 extern "C" {
+#include <rockchip/mpp_buffer.h>
 #include <rockchip/rk_mpi.h>
 }
 
@@ -64,15 +65,21 @@ public:
     static MppCodingType avCodecIdToMppCoding(int codec_id);
 
 private:
+    bool configureFrameBufferGroup(MppFrame frame);
+    void releaseFrameBufferGroup();
+
     /**
      * 循环调用 decode_get_frame，将所有已解码帧追加到 out。
      * 有效帧追加后由调用方负责 deinit；EOS/ERR 帧在内部 deinit。
      */
     void drainFrames(std::vector<MppFrame>& out);
 
-    MppCtx      ctx_       = nullptr;
-    MppApi*     mpi_       = nullptr;
-    std::string stream_id_;
+    MppCtx         ctx_                   = nullptr;
+    MppApi*        mpi_                   = nullptr;
+    MppBufferGroup frame_buffer_group_    = nullptr;
+    size_t         frame_buffer_size_     = 0;
+    int            frame_buffer_count_    = 0;
+    std::string    stream_id_;
 };
 
 } // namespace media_agent

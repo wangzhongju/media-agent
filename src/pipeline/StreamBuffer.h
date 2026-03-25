@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace media_agent {
 
@@ -39,6 +40,6 @@ public:
     virtual void stop() = 0;
 };
 
-std::shared_ptr<IStreamBuffer> createStreamBuffer();
+std::shared_ptr<IStreamBuffer> createStreamBuffer(const std::string& stream_id);
 
 } // namespace media_agent

@@ -1,115 +1,22 @@
 #include "pipeline/Pipeline.h"
 
+#include "pipeline/Utils.h"
+
 #include "common/Logger.h"
 #include "common/Statistics.h"
 #include "common/Time.h"
 #include "detector/DetectorFactory.h"
 #include "protocol/MessageMapper.h"
 
-#include <google/protobuf/util/message_differencer.h>
-
 #include <algorithm>
 #include <chrono>
+#include <optional>
 #include <utility>
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-}
 
 namespace media_agent {
 
-namespace {
-
 constexpr size_t kMinVideoWatermark = 1;
-
-AlgorithmConfig selectAlarmConfig(const StreamConfig& stream_config,
-                                  const std::string& algorithm_id) {
-    if (!algorithm_id.empty()) {
-        for (const auto& algorithm : stream_config.algorithms()) {
-            if (algorithm.algorithm_id() == algorithm_id) {
-                return algorithm;
-            }
-        }
-    }
-    if (stream_config.algorithms_size() > 0) {
-        return stream_config.algorithms(0);
-    }
-    return AlgorithmConfig();
-}
-
-bool isSameStreamConfig(const StreamConfig& lhs, const StreamConfig& rhs) {
-    return google::protobuf::util::MessageDifferencer::Equals(lhs, rhs);
-}
-
-SeiCodecType seiCodecTypeFromFrame(const std::shared_ptr<FrameBundle>& frame) {
-    if (frame && frame->source_coding == MPP_VIDEO_CodingHEVC) {
-        return SeiCodecType::H265;
-    }
-    return SeiCodecType::H264;
-}
-
-int parseNalLengthSizeFromExtradata(SeiCodecType codec_type,
-                                    const std::vector<uint8_t>& extradata) {
-    if (extradata.empty() || extradata[0] != 0x01) {
-        return 0;
-    }
-
-    size_t offset = 0;
-    switch (codec_type) {
-        case SeiCodecType::H264:
-            if (extradata.size() < 5) {
-                return 0;
-            }
-            offset = 4;
-            break;
-        case SeiCodecType::H265:
-            if (extradata.size() < 22) {
-                return 0;
-            }
-            offset = 21;
-            break;
-    }
-
-    const int nal_length_size = static_cast<int>((extradata[offset] & 0x03) + 1);
-    return nal_length_size >= 1 && nal_length_size <= 4 ? nal_length_size : 0;
-}
-
-int videoNalLengthSizeFromSpecs(const std::vector<RtspStreamSpec>& specs) {
-    for (const auto& spec : specs) {
-        if (spec.media_type != MediaType::Video) {
-            continue;
-        }
-
-        if (spec.codec_id == AV_CODEC_ID_H264) {
-            return parseNalLengthSizeFromExtradata(SeiCodecType::H264, spec.extradata);
-        }
-        if (spec.codec_id == AV_CODEC_ID_HEVC) {
-            return parseNalLengthSizeFromExtradata(SeiCodecType::H265, spec.extradata);
-        }
-        return 0;
-    }
-    return 0;
-}
-
-SeiPayloadContext buildPayloadContext(const std::string& stream_id,
-                                      int64_t frame_id,
-                                      int64_t pts,
-                                      const std::string& algorithm_id,
-                                      const std::vector<DetectionObject>& objects,
-                                      bool reused_cached_result,
-                                      int64_t expire_at_mono_ms) {
-    SeiPayloadContext context;
-    context.stream_id = stream_id;
-    context.frame_id = frame_id;
-    context.pts = pts;
-    context.algorithm_id = algorithm_id;
-    context.objects = objects;
-    context.reused_cached_result = reused_cached_result;
-    context.result_expire_at_mono_ms = expire_at_mono_ms;
-    return context;
-}
-
-} // namespace
+constexpr int64_t kAlarmSnapshotMinIntervalMs = 5000;
 
 Pipeline::Pipeline(AppConfig cfg)
     : cfg_(std::move(cfg)) {}
@@ -261,7 +168,6 @@ void Pipeline::configLoop() {
     LOG_INFO("[Pipeline::configLoop] exited");
 }
 
-
 void Pipeline::applyConfigBatch(const std::map<std::string, StreamConfig>& desired_streams) {
     std::vector<std::shared_ptr<StreamContext>> streams_to_stop;
     std::vector<StreamConfig> streams_to_start;
@@ -320,8 +226,14 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
     stream->stream_id = config.stream_id();
     Statistics::instance().registerStream(stream->stream_id);
     stream->config = config;
-    stream->buffer = createStreamBuffer();
+    stream->buffer = createStreamBuffer(stream->stream_id);
     stream->publisher = std::make_unique<RtspPublisher>();
+    stream->recorder = std::make_unique<Recorder>();
+    stream->snapshotter = std::make_unique<Snapshotter>();
+    if (!config.alarm_snapshot_dir().empty() &&
+        !stream->snapshotter->configure(stream->stream_id, config.alarm_snapshot_dir())) {
+        LOG_WARN("[Pipeline] stream={} snapshotter configure failed", stream->stream_id);
+    }
 
     auto detector_runtime = std::make_shared<DetectorRuntimeEntry>();
     detector_runtime->config = config;
@@ -342,13 +254,27 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
                 infer_scheduler_->notifyFrameReady(stream_id);
             }
         },
-        [stream, config](const std::vector<RtspStreamSpec>& specs) {
-            if (!stream || !stream->publisher || config.new_rtsp_url().empty()) {
+        [this, stream, config](const std::vector<RtspStreamSpec>& specs) {
+            if (!stream) {
                 return;
             }
+
             stream->video_nal_length_size.store(videoNalLengthSizeFromSpecs(specs));
-            if (!stream->publisher->configure(stream->stream_id, config.new_rtsp_url(), specs)) {
+            if (stream->publisher && !config.new_rtsp_url().empty() &&
+                !stream->publisher->configure(stream->stream_id, config.new_rtsp_url(), specs)) {
                 LOG_WARN("[Pipeline] stream={} publisher configure failed", stream->stream_id);
+            }
+
+            configureStreamRecorder(stream, specs);
+        },
+        [stream](const std::shared_ptr<AVPacket>& packet) {
+            if (!stream || !stream->recorder || !packet) {
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(stream->recorder_mutex);
+            if (!stream->recorder->appendPacket(packet)) {
+                LOG_WARN("[Pipeline] stream={} recorder append packet failed", stream->stream_id);
             }
         });
 
@@ -371,6 +297,73 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
 
     LOG_INFO("[Pipeline] stream={} skeleton context created", stream->stream_id);
     return stream;
+}
+
+void Pipeline::configureStreamRecorder(const std::shared_ptr<StreamContext>& stream,
+                                       const std::vector<RtspStreamSpec>& specs) {
+    if (!stream || !stream->recorder || stream->config.alarm_record_dir().empty()) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(stream->recorder_mutex);
+    if (!stream->recorder->configure(stream->stream_id, stream->config.alarm_record_dir(), specs)) {
+        LOG_WARN("[Pipeline] stream={} recorder configure failed", stream->stream_id);
+    }
+}
+
+std::string Pipeline::triggerAlarmRecording(const std::shared_ptr<StreamContext>& stream,
+                                            int64_t now_ms) {
+    if (!stream || !stream->recorder || stream->config.alarm_record_dir().empty()) {
+        return {};
+    }
+
+    const int duration_s = stream->config.alarm_record_duration_s();
+    if (duration_s <= 0) {
+        return {};
+    }
+
+    std::lock_guard<std::mutex> lock(stream->recorder_mutex);
+    if (!stream->recorder->requestRecording(duration_s, now_ms)) {
+        LOG_WARN("[Pipeline] stream={} recorder trigger failed duration_s={}",
+                 stream->stream_id,
+                 duration_s);
+        return {};
+    }
+
+    return stream->recorder->currentFileName();
+}
+
+std::string Pipeline::triggerAlarmSnapshot(const std::shared_ptr<StreamContext>& stream,
+                                           int64_t now_mono_ms,
+                                           const FrameBundle& frame,
+                                           const std::vector<DetectionObject>& objects) {
+    if (!stream || !stream->snapshotter || stream->config.alarm_snapshot_dir().empty() ||
+        !frame.decoded_image || objects.empty()) {
+        return {};
+    }
+
+    const int64_t last_trigger_ms = stream->last_snapshot_trigger_mono_ms.load();
+    if (last_trigger_ms > 0 && now_mono_ms - last_trigger_ms < kAlarmSnapshotMinIntervalMs) {
+        return stream->snapshotter->currentFileName();
+    }
+
+    std::lock_guard<std::mutex> lock(stream->snapshot_mutex);
+    const int64_t confirmed_last_trigger_ms = stream->last_snapshot_trigger_mono_ms.load();
+    if (confirmed_last_trigger_ms > 0 &&
+        now_mono_ms - confirmed_last_trigger_ms < kAlarmSnapshotMinIntervalMs) {
+        return stream->snapshotter->currentFileName();
+    }
+
+    if (!stream->snapshotter->saveJpeg(frame, objects)) {
+        LOG_WARN("[Pipeline] stream={} snapshot trigger failed frame_id={} objects={}",
+                 stream->stream_id,
+                 frame.frame_id,
+                 objects.size());
+        return {};
+    }
+
+    stream->last_snapshot_trigger_mono_ms.store(now_mono_ms);
+    return stream->snapshotter->currentFileName();
 }
 
 void Pipeline::heartbeatLoop() {
@@ -441,10 +434,26 @@ void Pipeline::inferLoop(int idx) {
                 task.buffer->markInferenceDone(inference_result);
                 task.buffer->updateCachedInferenceResult(inference_result);
                 Statistics::instance().incInferFrame(task.stream_id);
+                Statistics::instance().setRemainFrameSize(task.stream_id, task.buffer->frameCount());
+
+                std::string record_name;
+                std::string snapshot_name;
+                if (!inference_result.objects.empty()) {
+                    const int64_t now_mono_ms = steadyNowMs();
+                    record_name = triggerAlarmRecording(stream, now_mono_ms);
+                    snapshot_name = triggerAlarmSnapshot(stream,
+                                                         now_mono_ms,
+                                                         *task.frame,
+                                                         inference_result.objects);
+                }
 
                 if (ipc_) {
                     for (const auto& target : inference_result.objects) {
-                        ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id, alarm_config, target));
+                        ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
+                                                      alarm_config,
+                                                      target,
+                                                      snapshot_name,
+                                                      record_name));
                     }
                 }
                 inference_ok = true;
@@ -497,6 +506,7 @@ void Pipeline::publishLoop(const std::shared_ptr<StreamContext>& stream) {
                                       payload,
                                       packet_override);
             }
+            Statistics::instance().incPublishFrame(stream->stream_id);
         }
 
         if (stream->publisher && !stream->publisher->writePacket(*packet, packet_override)) {
@@ -535,6 +545,14 @@ void Pipeline::stopStream(const std::shared_ptr<StreamContext>& stream) {
     }
     if (stream->publisher) {
         stream->publisher->close();
+    }
+    if (stream->recorder) {
+        std::lock_guard<std::mutex> lock(stream->recorder_mutex);
+        stream->recorder->close();
+    }
+    if (stream->snapshotter) {
+        std::lock_guard<std::mutex> lock(stream->snapshot_mutex);
+        stream->snapshotter->close();
     }
     if (stream->detector_runtime) {
         std::lock_guard<std::mutex> lock(stream->detector_runtime->mutex);

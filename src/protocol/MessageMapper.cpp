@@ -25,7 +25,9 @@ std::string serializeEnvelope(Envelope env) {
 
 AlarmInfo buildAlarmInfo(const std::string& stream_id,
                          const AlgorithmConfig& detector_cfg,
-                         const DetectionObject& target) {
+                         const DetectionObject& target,
+                         const std::string& snapshot_name,
+                         const std::string& record_name) {
     AlarmInfo alarm;
     alarm.set_alarm_id(generateUuidV4());
     alarm.set_stream_id(stream_id);
@@ -36,6 +38,8 @@ AlarmInfo buildAlarmInfo(const std::string& stream_id,
     alarm.set_level(detector_cfg.alarm_level());
     alarm.set_confidence(target.confidence());
     alarm.mutable_target()->CopyFrom(target);
+    alarm.set_snapshot_name(snapshot_name);
+    alarm.set_record_name(record_name);
     return alarm;
 }
 

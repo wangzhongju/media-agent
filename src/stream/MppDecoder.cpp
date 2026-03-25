@@ -2,6 +2,10 @@
 #include "common/Logger.h"
 
 extern "C" {
+#include <rockchip/mpp_packet.h>
+}
+
+extern "C" {
 #include <libavcodec/avcodec.h>    // AVCodecID, AVPacket
 }
 
@@ -9,6 +13,7 @@ namespace media_agent {
 
 namespace {
 
+constexpr int    kDecoderFrameBufferCount = 24;
 std::string frameErrInfoToString(RK_U32 errinfo) {
     if (errinfo == 0) {
         return "none";
@@ -46,6 +51,65 @@ std::string frameErrInfoToString(RK_U32 errinfo) {
 }
 
 } // namespace
+
+bool MppDecoder::configureFrameBufferGroup(MppFrame frame) {
+    if (!ctx_ || !mpi_ || !frame) {
+        return false;
+    }
+
+    size_t required_size = mpp_frame_get_buf_size(frame);
+    if (required_size == 0) {
+        const size_t hor_stride = static_cast<size_t>(mpp_frame_get_hor_stride(frame));
+        const size_t ver_stride = static_cast<size_t>(mpp_frame_get_ver_stride(frame));
+        required_size = hor_stride * ver_stride * 2;
+    }
+
+    MPP_RET ret = MPP_OK;
+
+    if (!frame_buffer_group_) {
+        ret = mpp_buffer_group_get_internal(&frame_buffer_group_, MPP_BUFFER_TYPE_ION);
+        if (ret != MPP_OK || !frame_buffer_group_) {
+            LOG_ERROR("[MppDecoder] stream={} frame half-internal group init failed ret={}",
+                      stream_id_, static_cast<int>(ret));
+            frame_buffer_group_ = nullptr;
+            return false;
+        }
+    }
+
+    if (frame_buffer_size_ != required_size || frame_buffer_count_ != kDecoderFrameBufferCount) {
+        ret = mpp_buffer_group_limit_config(frame_buffer_group_, required_size, kDecoderFrameBufferCount);
+        if (ret != MPP_OK) {
+            LOG_ERROR("[MppDecoder] stream={} frame group limit failed size={} count={} ret={}",
+                      stream_id_, required_size, kDecoderFrameBufferCount, static_cast<int>(ret));
+            return false;
+        }
+
+        frame_buffer_size_ = required_size;
+        frame_buffer_count_ = kDecoderFrameBufferCount;
+    }
+
+    ret = mpi_->control(ctx_, MPP_DEC_SET_EXT_BUF_GROUP, frame_buffer_group_);
+    if (ret != MPP_OK) {
+        LOG_ERROR("[MppDecoder] stream={} MPP_DEC_SET_EXT_BUF_GROUP failed ret={}",
+                  stream_id_, static_cast<int>(ret));
+        return false;
+    }
+    return true;
+}
+
+void MppDecoder::releaseFrameBufferGroup() {
+    if (!frame_buffer_group_) {
+        frame_buffer_size_ = 0;
+        frame_buffer_count_ = 0;
+        return;
+    }
+
+    mpp_buffer_group_clear(frame_buffer_group_);
+    mpp_buffer_group_put(frame_buffer_group_);
+    frame_buffer_group_ = nullptr;
+    frame_buffer_size_ = 0;
+    frame_buffer_count_ = 0;
+}
 
 // ── 静态辅助：AVCodecID → MppCodingType ─────────────────────
 MppCodingType MppDecoder::avCodecIdToMppCoding(int codec_id) {
@@ -87,12 +151,29 @@ bool MppDecoder::init(MppCodingType coding,
     // 发送 SPS/PPS extradata（H.264 avcc → Annex-B 由 MPP 自行处理）
     if (extradata && extra_size > 0) {
         MppPacket extra_pkt = nullptr;
-        mpp_packet_init(&extra_pkt,
-                        const_cast<uint8_t*>(extradata),
-                        static_cast<size_t>(extra_size));
+        ret = mpp_packet_init(&extra_pkt,
+                              const_cast<uint8_t*>(extradata),
+                              static_cast<size_t>(extra_size));
+        if (ret != MPP_OK || !extra_pkt) {
+            LOG_ERROR("[MppDecoder] stream={} build extradata dma packet failed size={}",
+                      stream_id_, extra_size);
+            destroy();
+            return false;
+        }
+
+        mpp_packet_set_pos(extra_pkt, const_cast<uint8_t*>(extradata));
+        mpp_packet_set_length(extra_pkt, static_cast<size_t>(extra_size));
         mpp_packet_set_extra_data(extra_pkt);
-        mpi_->decode_put_packet(ctx_, extra_pkt);
+
+        const MPP_RET extra_ret = mpi_->decode_put_packet(ctx_, extra_pkt);
         mpp_packet_deinit(&extra_pkt);
+        if (extra_ret != MPP_OK && extra_ret != MPP_ERR_BUFFER_FULL) {
+            LOG_ERROR("[MppDecoder] stream={} send extradata failed ret={}",
+                      stream_id_, static_cast<int>(extra_ret));
+            destroy();
+            return false;
+        }
+
         LOG_DEBUG("[MppDecoder] stream={} sent extradata {} bytes", stream_id_, extra_size);
     }
 
@@ -108,6 +189,8 @@ void MppDecoder::destroy() {
         ctx_ = nullptr;
         mpi_ = nullptr;
     }
+
+    releaseFrameBufferGroup();
 }
 
 // ── submitPacket ─────────────────────────────────────────────
@@ -115,7 +198,16 @@ bool MppDecoder::submitPacket(AVPacket* pkt, std::vector<MppFrame>& out_frames) 
     if (!ctx_ || !pkt) return false;
 
     MppPacket mpp_pkt = nullptr;
-    mpp_packet_init(&mpp_pkt, pkt->data, static_cast<size_t>(pkt->size));
+    const MPP_RET init_ret = mpp_packet_init(&mpp_pkt,
+                                             pkt->data,
+                                             static_cast<size_t>(std::max(pkt->size, 0)));
+    if (init_ret != MPP_OK || !mpp_pkt) {
+        LOG_WARN("[MppDecoder] stream={} mpp_packet_init failed size={}", stream_id_, pkt->size);
+        return false;
+    }
+
+    mpp_packet_set_pos(mpp_pkt, pkt->data);
+    mpp_packet_set_length(mpp_pkt, static_cast<size_t>(std::max(pkt->size, 0)));
     mpp_packet_set_pts(mpp_pkt, static_cast<RK_S64>(pkt->pts));
     mpp_packet_set_dts(mpp_pkt, static_cast<RK_S64>(pkt->dts));
 
@@ -156,6 +248,12 @@ void MppDecoder::drainFrames(std::vector<MppFrame>& out) {
                      mpp_frame_get_height(mpp_frame),
                      mpp_frame_get_hor_stride(mpp_frame),
                      mpp_frame_get_ver_stride(mpp_frame));
+            if (!configureFrameBufferGroup(mpp_frame)) {
+                LOG_ERROR("[MppDecoder] stream={} configure dma_heap frame group failed", stream_id_);
+                mpp_frame_deinit(&mpp_frame);
+                break;
+            }
+
             mpi_->control(ctx_, MPP_DEC_SET_INFO_CHANGE_READY, nullptr);
             mpp_frame_deinit(&mpp_frame);
         } else if (!is_eos && !is_err && !is_discard) {
@@ -163,7 +261,7 @@ void MppDecoder::drainFrames(std::vector<MppFrame>& out) {
             out.push_back(mpp_frame);
         } else {
             if (is_err) {
-                LOG_WARN("[MppDecoder] stream={} mpp frame error, skip errinfo=0x{:x} ({}) discard={} pts={} dts={} poc={}",
+                LOG_DEBUG("[MppDecoder] stream={} mpp frame error, skip errinfo=0x{:x} ({}) discard={} pts={} dts={} poc={}",
                          stream_id_,
                          errinfo,
                          frameErrInfoToString(errinfo),

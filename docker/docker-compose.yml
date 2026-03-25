@@ -14,7 +14,7 @@ services:
     devices:
       - /dev/dri:/dev/dri           # GPU/VPU（rkmpp 硬件解码）
       - /dev/dma_heap:/dev/dma_heap # DMA 堆（rkmpp 需要）
-      # - /dev/rknpu:/dev/rknpu     # NPU（如算法库直接访问 NPU）
+      - /dev/rknpu:/dev/rknpu     # NPU（如算法库直接访问 NPU）
 
     # ── 卷挂载 ────────────────────────────────────────────
     volumes:
@@ -26,8 +26,6 @@ services:
       - media_agent_logs:/var/log/media_agent
       # 算法模型（按需挂载）
       - /opt/models:/opt/models:ro
-      # 算法库运行时（按需挂载）
-      # - /opt/algo_lib:/usr/local/lib/algo:ro
 
     # ── 网络：仅本地，不暴露端口 ──────────────────────────
     network_mode: host
@@ -35,6 +33,12 @@ services:
     # ── 环境变量 ──────────────────────────────────────────
     environment:
       - TZ=Asia/Shanghai
+
+    # ── 进程限制 ──────────────────────────────────────────
+    ulimits:
+      nofile:
+        soft: 2048
+        hard: 2048
 
     # ── 资源限制（可选）──────────────────────────────────
     # deploy:

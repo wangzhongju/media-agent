@@ -30,6 +30,7 @@ pkg_check_modules(FFMPEG REQUIRED
     libavformat
     libavcodec
     libavutil
+    libswscale
 )
 
 # ── 第三方：Rockchip MPP（硬件视频解码）────────────────────

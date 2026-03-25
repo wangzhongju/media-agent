@@ -5,6 +5,7 @@
 #include <chrono>
 #include <utility>
 #include <vector>
+#include "Statistics.h"
 
 namespace media_agent {
 
@@ -90,7 +91,37 @@ void Statistics::incInferFrame(const std::string& stream_id, uint64_t n) {
     counter.infer_frames += n;
 }
 
-void Statistics::loop() {
+void Statistics::incPublishFrame(const std::string& stream_id, uint64_t n) {
+    if (stream_id.empty() || n == 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto& counter = counters_[stream_id];
+    counter.publish_frames += n;
+}
+
+void Statistics::setRemainPacketSize(const std::string &stream_id, uint64_t size)
+{
+    if (stream_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto& counter = counters_[stream_id];
+    counter.remain_packet_size = size;
+}
+
+void Statistics::setRemainFrameSize(const std::string &stream_id, uint64_t size)
+{
+    if (stream_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto& counter = counters_[stream_id];
+    counter.remain_frame_size = size;
+}
+
+void Statistics::loop()
+{
     while (running_) {
         std::vector<std::pair<std::string, Counters>> snapshot;
         std::unordered_map<std::string, Counters> last_snapshot;
@@ -116,6 +147,14 @@ void Statistics::loop() {
             continue;
         }
 
+        const double interval_seconds = static_cast<double>(interval_ms) / 1000.0;
+        uint64_t total_delta_rtsp = 0;
+        uint64_t total_delta_decode = 0;
+        uint64_t total_delta_infer = 0;
+        uint64_t total_delta_publish = 0;
+        uint64_t total_remain_packet_size = 0;
+        uint64_t total_remain_frame_size = 0;
+
         for (const auto& [stream_id, current] : snapshot) {
             const auto last_it = last_snapshot.find(stream_id);
             const Counters last = last_it == last_snapshot.end() ? Counters{} : last_it->second;
@@ -123,8 +162,16 @@ void Statistics::loop() {
             const uint64_t delta_rtsp = current.rtsp_pull_frames - last.rtsp_pull_frames;
             const uint64_t delta_decode = current.mpp_decode_frames - last.mpp_decode_frames;
             const uint64_t delta_infer = current.infer_frames - last.infer_frames;
+            const uint64_t delta_publish = current.publish_frames - last.publish_frames;
 
-            LOG_INFO("[Statistics] stream={} {}s recv=+{}({}) decode=+{}({}) infer=+{}({})",
+            total_delta_rtsp += delta_rtsp;
+            total_delta_decode += delta_decode;
+            total_delta_infer += delta_infer;
+            total_delta_publish += delta_publish;
+            total_remain_packet_size += current.remain_packet_size;
+            total_remain_frame_size += current.remain_frame_size;
+
+            LOG_DEBUG("[Statistics] {} {}s recv=+{}({}) dec=+{}({}) infer=+{}({}) pub=+{}({}), p/f={}/{}",
                      stream_id,
                      interval_ms / 1000,
                      delta_rtsp,
@@ -132,8 +179,21 @@ void Statistics::loop() {
                      delta_decode,
                      current.mpp_decode_frames,
                      delta_infer,
-                     current.infer_frames);
+                     current.infer_frames,
+                     delta_publish,
+                     current.publish_frames,
+                     current.remain_packet_size,
+                     current.remain_frame_size);
         }
+
+        LOG_INFO("[Statistics] total={} recv={:.2f}/s dec={:.2f}/s infer={:.2f}/s pub={:.2f}/s, p/f={}/{}",
+                 snapshot.size(),
+                 interval_seconds > 0.0 ? static_cast<double>(total_delta_rtsp) / interval_seconds : 0.0,
+                 interval_seconds > 0.0 ? static_cast<double>(total_delta_decode) / interval_seconds : 0.0,
+                 interval_seconds > 0.0 ? static_cast<double>(total_delta_infer) / interval_seconds : 0.0,
+                 interval_seconds > 0.0 ? static_cast<double>(total_delta_publish) / interval_seconds : 0.0,
+                 total_remain_packet_size,
+                 total_remain_frame_size);
 
         {
             std::lock_guard<std::mutex> lock(mutex_);

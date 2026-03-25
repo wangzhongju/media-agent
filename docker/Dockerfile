@@ -1,8 +1,8 @@
 # ─────────────────────────────────────────────────────────
 # Stage 1: 编译镜像
-# 基础镜像：Ubuntu 22.04 (适配 RK3588 BSP 工具链)
+# 基础镜像：Ubuntu 20.04 (适配 RK3588 BSP 工具链)
 # ─────────────────────────────────────────────────────────
-FROM ubuntu:22.04 AS builder
+FROM ubuntu:20.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -17,23 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavformat-dev \
     libavutil-dev \
     libswscale-dev \
-    libswresample-dev \
     # Protobuf 编译器和开发库
     protobuf-compiler \
     libprotobuf-dev \
-    # nlohmann/json
-    nlohmann-json3-dev \
-    # spdlog
-    libspdlog-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
 # 拷贝源码
 COPY . .
-
-# 拷贝算法库（构建时需要；若无则 cmake 以 stub 模式编译）
-# COPY third_party/algo_lib /build/third_party/algo_lib
 
 # 编译
 RUN cmake -B build -S . \
@@ -44,9 +36,11 @@ RUN cmake -B build -S . \
 # ─────────────────────────────────────────────────────────
 # Stage 2: 运行镜像（精简）
 # ─────────────────────────────────────────────────────────
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu:20.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG VIDEO_GID=44
+ARG RENDER_GID=109
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # FFmpeg 运行时
@@ -56,8 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswscale6 \
     # Protobuf 运行时
     libprotobuf23 \
-    # spdlog 运行时
-    libspdlog1 \
     # 时区
     tzdata \
     && rm -rf /var/lib/apt/lists/*
@@ -66,21 +58,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# 创建运行用户（非 root）
-RUN useradd -m -u 1000 agent
+# 映射宿主机常见的 video/render 组，供 /dev/dma_heap 和 /dev/dri 设备权限使用
+RUN set -eux; \
+    if getent group video >/dev/null; then groupmod -o -g "${VIDEO_GID}" video; else groupadd -g "${VIDEO_GID}" video; fi; \
+    if getent group render >/dev/null; then groupmod -o -g "${RENDER_GID}" render; else groupadd -g "${RENDER_GID}" render; fi; \
+    useradd -m -u 1000 -G video,render agent
 
 WORKDIR /app
 
 # 从编译阶段拷贝产物
 COPY --from=builder /build/build/bin/media_agent /app/media_agent
 COPY --from=builder /build/config/config.json    /app/config/config.json
+COPY --from=builder /build/third_party/edgeInfer/lib/ /usr/local/lib/
+COPY --from=builder /build/third_party/edgeInfer/weights/ /opt/models/edgeInfer/
 
 # 日志目录
-RUN mkdir -p /var/log/media_agent && chown agent:agent /var/log/media_agent
+RUN mkdir -p /var/log/media_agent \
+    && chown agent:agent /var/log/media_agent \
+    && ldconfig
 
-# 算法库运行时（若有）
-# COPY third_party/algo_lib/lib/*.so /usr/local/lib/
-# RUN ldconfig
+# 默认内置 EdgeInfer 运行库与模型；如宿主机挂载 /opt/models 会覆盖镜像内模型
 
 USER agent
 

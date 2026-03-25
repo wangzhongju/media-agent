@@ -1,5 +1,8 @@
 #include "pipeline/StreamBuffer.h"
 
+#include "common/Logger.h"
+#include "common/Statistics.h"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -21,6 +24,9 @@ constexpr int64_t kCachedInferenceMatchWindowPts =
 
 class StreamBuffer final : public IStreamBuffer {
 public:
+    explicit StreamBuffer(std::string stream_id)
+        : stream_id_(std::move(stream_id)) {}
+
     bool enqueuePacket(std::shared_ptr<EncodedPacket> packet) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopped_ || !packet) {
@@ -51,6 +57,7 @@ public:
 
     std::shared_ptr<FrameBundle> selectFrameForInference() override {
         std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_ptr<FrameBundle> selected_frame;
         for (auto it = frame_order_.rbegin(); it != frame_order_.rend(); ++it) {
             auto frame_it = frames_.find(*it);
             if (frame_it == frames_.end() || !frame_it->second) {
@@ -60,11 +67,43 @@ public:
                 continue;
             }
             if (frame_it->second->infer_state == InferState::Idle) {
-                frame_it->second->infer_state = InferState::Selected;
-                return frame_it->second;
+                selected_frame = frame_it->second;
+                break;
             }
         }
-        return nullptr;
+
+        if (!selected_frame) {
+            return nullptr;
+        }
+
+        selected_frame->infer_state = InferState::Selected;
+
+        size_t done_marked = 0;
+        for (const auto& frame_id : frame_order_) {
+            auto frame_it = frames_.find(frame_id);
+            if (frame_it == frames_.end() || !frame_it->second) {
+                continue;
+            }
+            if (frame_it->second == selected_frame) {
+                continue;
+            }
+            if (isInferenceTerminal(frame_it->second->infer_state)) {
+                continue;
+            }
+
+            frame_it->second->infer_state = InferState::Done;
+            ++done_marked;
+        }
+
+        LOG_DEBUG("[StreamBuffer] {} selected frame_id={} marked_done={} oldest={} latest={} frames={}",
+                 stream_id_,
+                 selected_frame->frame_id,
+                 done_marked,
+                 frame_order_.empty() ? -1 : frame_order_.front(),
+                 frame_order_.empty() ? -1 : frame_order_.back(),
+                 frames_.size());
+        cv_.notify_all();
+        return selected_frame;
     }
 
     void markInferenceRunning(int64_t frame_id) override {
@@ -214,9 +253,15 @@ private:
         return state == InferState::Done || state == InferState::Dropped;
     }
 
-    bool hasDecodedFrameLocked() const {
+    bool isInferring(InferState state) const {
+        return state == InferState::Selected || state == InferState::Running;
+    }
+
+    bool hasDecodedFrameLocked(std::optional<int64_t> excluded_frame_id = std::nullopt) const {
         for (const auto& [frame_id, frame] : frames_) {
-            (void)frame_id;
+            if (excluded_frame_id.has_value() && frame_id == *excluded_frame_id) {
+                continue;
+            }
             if (frame && frame->decoded_image) {
                 return true;
             }
@@ -224,19 +269,32 @@ private:
         return false;
     }
 
-    std::optional<int64_t> earliestBlockingDecodedFrameIdLocked() const {
+    std::optional<int64_t> inferringFrameIdLocked() const {
         for (const int64_t frame_id : frame_order_) {
             auto it = frames_.find(frame_id);
             if (it == frames_.end() || !it->second || !it->second->decoded_image) {
                 continue;
             }
-            if (!isInferenceTerminal(it->second->infer_state)) {
+            if (isInferring(it->second->infer_state)) {
                 return frame_id;
             }
         }
         return std::nullopt;
     }
 
+    // 判断队头 packet 是否可以出队发送给下游。
+    //
+    // 快速路径：水位控制关闭 或 队列中无视频包时直接放行。
+    //
+    // 音频包无条件放行，避免音频交付受推理延迟影响。代价是流启动阶段
+    // 视频水位尚未填满时，接收端可能短暂出现有声无画。
+    //
+    // 视频包需同时满足以下四个门控：
+    //   1. 不能位于正在推理的帧（Selected/Running）及其之后。
+    //   2. 关联的解码帧必须已入队（防止 releaseFrame 先于 enqueueFrame 的竞态）。
+    //   3. 释放后 buffer 中至少还剩一个解码帧（防止推理管线饥饿）。
+    //   4. 缓冲的视频包数量充足（水位门控）。使用严格 '>' 而非 '>='，
+    //      确保 pop 之后 video_packet_count_ 仍 >= min_video_watermark。
     bool canPublishLocked(size_t min_video_watermark) const {
         if (packets_.empty()) {
             return false;
@@ -252,32 +310,57 @@ private:
         if (!front) {
             return true;
         }
-        if (!hasDecodedFrameLocked()) {
-            return false;
-        }
 
-        const auto blocking_frame_id = earliestBlockingDecodedFrameIdLocked();
-        if (blocking_frame_id.has_value()) {
-            if (front->media_type != MediaType::Video) {
-                return false;
-            }
-            if (front->frame_id < 0 || front->frame_id >= *blocking_frame_id) {
-                return false;
-            }
-        }
-
+        // 音频：无条件放行。
         if (front->media_type == MediaType::Audio) {
-            return video_packet_count_ >= min_video_watermark;
+            return true;
         }
 
-        // Do not release a video packet before its decoded frame has reached the
-        // inference buffer, otherwise releaseFrame(frame_id) will race ahead of
-        // enqueueFrame(frame_id) and the frame will be dropped as "already released".
-        if (front->frame_id >= 0 && frames_.find(front->frame_id) == frames_.end()) {
-            return false;
+        // --- 以下仅处理视频 ---
+
+        // 门控 1：不得发布位于正在推理帧（Selected/Running）及其之后的视频包。
+        const auto inferring_frame_id = inferringFrameIdLocked();
+        if (inferring_frame_id.has_value()) {
+            if (front->frame_id < 0 || front->frame_id >= *inferring_frame_id) {
+                return false;
+            }
         }
 
+        if (front->frame_id >= 0) {
+            auto frame_it = frames_.find(front->frame_id);
+            // 门控 2：解码帧尚未入队。若此时发布，releaseFrame() 会先于
+            //         enqueueFrame() 执行，导致该帧被静默丢弃。
+            if (frame_it == frames_.end()) return false;
+            // 门控 3：该帧是 buffer 中唯一的解码帧，保留它以确保推理管线
+            //         始终至少有一帧可选。
+            if (frame_it->second && frame_it->second->decoded_image &&
+                !hasDecodedFrameLocked(front->frame_id)) return false;
+        }
+
+        // 门控 4：视频水位——保持足够的缓冲包数量。
         return video_packet_count_ > min_video_watermark;
+    }
+
+    const char* inferStateNameLocked(int64_t frame_id) const {
+        auto it = frames_.find(frame_id);
+        if (it == frames_.end() || !it->second) {
+            return "missing";
+        }
+
+        switch (it->second->infer_state) {
+            case InferState::Idle:
+                return "Idle";
+            case InferState::Selected:
+                return "Selected";
+            case InferState::Running:
+                return "Running";
+            case InferState::Done:
+                return "Done";
+            case InferState::Dropped:
+                return "Dropped";
+        }
+
+        return "Unknown";
     }
 
     void purgeExpiredCachedInferenceResultsLocked(int64_t now_mono_ms) {
@@ -299,10 +382,11 @@ private:
     std::unordered_map<int64_t, FrameInferenceResult> cached_inference_results_;
     size_t video_packet_count_ = 0;
     bool stopped_ = false;
+    std::string stream_id_;
 };
 
-std::shared_ptr<IStreamBuffer> createStreamBuffer() {
-    return std::make_shared<StreamBuffer>();
+std::shared_ptr<IStreamBuffer> createStreamBuffer(const std::string& stream_id) {
+    return std::make_shared<StreamBuffer>(stream_id);
 }
 
 } // namespace media_agent

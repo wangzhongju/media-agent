@@ -6,8 +6,10 @@
 #include "media-agent.pb.h"
 #include "pipeline/InferScheduler.h"
 #include "pipeline/StreamBuffer.h"
+#include "stream/Recorder.h"
 #include "stream/RTSPPuller.h"
 #include "stream/RtspPublisher.h"
+#include "stream/Snapshotter.h"
 #include "stream/SeiInjector.h"
 
 #include <atomic>
@@ -33,6 +35,11 @@ struct StreamContext {
     std::shared_ptr<IStreamBuffer>  buffer;
     std::shared_ptr<DetectorRuntimeEntry> detector_runtime;
     std::atomic<int>                video_nal_length_size{0};
+    std::mutex                      recorder_mutex;
+    std::unique_ptr<Recorder>       recorder;
+    std::mutex                      snapshot_mutex;
+    std::unique_ptr<Snapshotter>    snapshotter;
+    std::atomic<int64_t>            last_snapshot_trigger_mono_ms{0};
     std::unique_ptr<RTSPPuller>      puller;
     std::unique_ptr<RtspPublisher>  publisher;
     std::thread                     publish_thread;
@@ -61,6 +68,14 @@ private:
 
     void applyConfigBatch(const std::map<std::string, StreamConfig>& desired_streams);
     std::shared_ptr<StreamContext> buildStreamContext(const StreamConfig& config);
+    void configureStreamRecorder(const std::shared_ptr<StreamContext>& stream,
+                                 const std::vector<RtspStreamSpec>& specs);
+    std::string triggerAlarmRecording(const std::shared_ptr<StreamContext>& stream,
+                                      int64_t now_ms);
+    std::string triggerAlarmSnapshot(const std::shared_ptr<StreamContext>& stream,
+                                     int64_t now_mono_ms,
+                                     const FrameBundle& frame,
+                                     const std::vector<DetectionObject>& objects);
     void stopStream(const std::shared_ptr<StreamContext>& stream);
     std::shared_ptr<StreamContext> findStream(const std::string& stream_id);
 

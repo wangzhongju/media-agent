@@ -8,26 +8,34 @@
 #include <filesystem>
 
 extern "C" {
-#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <libavutil/avutil.h>
-#include <rockchip/mpp_packet.h>
 }
 
 namespace media_agent {
 
 namespace {
 
-constexpr int kDefaultAlarmRecordDurationS = 10;
+constexpr int kDefaultRecordDurationS = 10;
 
-AVCodecID codecIdFromEncoderType(MppEncoderType type) {
-    switch (type) {
-        case MppEncoderType::H265: return AV_CODEC_ID_HEVC;
-        case MppEncoderType::JPEG: return AV_CODEC_ID_MJPEG;
-        case MppEncoderType::H264:
-        default:
-            return AV_CODEC_ID_H264;
+bool sameStreamSpecs(const std::vector<RtspStreamSpec>& left,
+                     const std::vector<RtspStreamSpec>& right) {
+    if (left.size() != right.size()) {
+        return false;
     }
+
+    for (size_t index = 0; index < left.size(); ++index) {
+        const auto& lhs = left[index];
+        const auto& rhs = right[index];
+        if (lhs.media_type != rhs.media_type ||
+            lhs.input_stream_index != rhs.input_stream_index ||
+            lhs.sample_rate != rhs.sample_rate ||
+            lhs.channels != rhs.channels ||
+            !sameStreamCodecParams(lhs, rhs)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace
@@ -43,105 +51,213 @@ std::string Recorder::buildRecordingFileName(const std::string& stream_id,
                                              const std::string& extension) {
     const std::string timestamp = makeTimestamp();
     const std::string date_dir = timestamp.substr(0, 8);
-    const std::string file_name = sanitizeFileComponent(stream_id) + "_" +
+    const std::string stream_dir = sanitizeFileComponent(stream_id);
+    const std::string file_name = stream_dir + "_" +
         timestamp + "." + extension;
-    return date_dir + "/" + file_name;
+    return date_dir + "/" + stream_dir + "/" + file_name;
 }
 
-bool Recorder::requestRecording(const std::string& stream_id,
-                                const std::string& base_dir,
-                                MppEncoderType type,
-                                int width,
-                                int height,
-                                int fps,
-                                int bitrate,
-                                int duration_s,
-                                int64_t now_ms,
-                                bool& started_new) {
-    started_new = false;
-    const int normalized_fps = fps > 0 ? fps : 25;
-    if (base_dir.empty() || width <= 0 || height <= 0) {
+bool Recorder::configure(const std::string& stream_id,
+                         const std::string& base_dir,
+                         const std::vector<RtspStreamSpec>& specs) {
+    if (stream_id.empty() || base_dir.empty() || specs.empty()) {
         return false;
     }
 
-    const bool params_changed = fmt_ctx_ &&
-        (type_ != type || width_ != width || height_ != height || fps_ != normalized_fps ||
-         bitrate_ != bitrate || base_dir_ != base_dir);
-    if (params_changed) {
-        close();
+    std::vector<RtspStreamSpec> normalized_specs = specs;
+    bool has_video_stream = false;
+    for (auto& spec : normalized_specs) {
+        spec.time_base = normalizedTimeBase(spec.time_base);
+        if (spec.media_type == MediaType::Video) {
+            spec.fps = spec.fps > 0 ? spec.fps : 25;
+            has_video_stream = true;
+        }
+    }
+    if (!has_video_stream) {
+        return false;
     }
 
+    const bool params_changed = stream_id_ != stream_id ||
+        base_dir_ != base_dir ||
+        !sameStreamSpecs(stream_specs_, normalized_specs);
+    if (params_changed) {
+        close();
+        clearPacketCache();
+    }
+
+    stream_id_ = stream_id;
     base_dir_ = base_dir;
-    type_ = type;
-    width_ = width;
-    height_ = height;
-    fps_ = normalized_fps;
-    bitrate_ = bitrate;
-    deadline_ms_ = now_ms + std::max(duration_s, kDefaultAlarmRecordDurationS) * 1000LL;
+    stream_specs_ = std::move(normalized_specs);
+    return true;
+}
+
+bool Recorder::requestRecording(int duration_s, int64_t now_ms) {
+    if (!isConfigured()) {
+        return false;
+    }
+
+    const int normalized_duration_s = std::max(duration_s, kDefaultRecordDurationS);
+    const int64_t requested_deadline_ms = now_ms + normalized_duration_s * 1000LL;
+    deadline_ms_ = std::max(deadline_ms_, requested_deadline_ms);
     if (fmt_ctx_) {
         return true;
     }
 
-    if (!openRecording(stream_id)) {
-        deadline_ms_ = 0;
+    return start();
+}
+
+bool Recorder::start() {
+    if (fmt_ctx_) {
+        return true;
+    }
+    if (!isConfigured()) {
         return false;
     }
-
-    started_new = true;
+    if (!openRecording()) {
+        return false;
+    }
+    if (!flushCachedGop()) {
+        close();
+        return false;
+    }
     return true;
 }
 
-bool Recorder::writePackets(const std::vector<MppPacket>& packets) {
-    if (!fmt_ctx_ || !stream_) {
+bool Recorder::appendPacket(const std::shared_ptr<AVPacket>& packet) {
+    if (!packet) {
+        return false;
+    }
+    return appendPacket(*packet);
+}
+
+bool Recorder::appendPacket(const AVPacket& packet) {
+    if (!packet.data || packet.size <= 0) {
         return false;
     }
 
-    for (const MppPacket& packet : packets) {
-        if (!packet) {
-            continue;
-        }
-
-        void* data = mpp_packet_get_pos(packet);
-        const size_t length = static_cast<size_t>(mpp_packet_get_length(packet));
-        if (!data || length == 0) {
-            continue;
-        }
-
-        const int64_t packet_pts_ms = static_cast<int64_t>(mpp_packet_get_pts(packet));
-        if (start_pts_ms_ < 0 && packet_pts_ms >= 0) {
-            start_pts_ms_ = packet_pts_ms;
-        }
-
-        AVPacket out_packet = {};
-        out_packet.data = static_cast<uint8_t*>(data);
-        out_packet.size = static_cast<int>(length);
-        out_packet.stream_index = stream_->index;
-        if (packet_pts_ms >= 0 && start_pts_ms_ >= 0) {
-            out_packet.pts = packet_pts_ms - start_pts_ms_;
-            out_packet.dts = out_packet.pts;
-        } else {
-            out_packet.pts = AV_NOPTS_VALUE;
-            out_packet.dts = AV_NOPTS_VALUE;
-        }
-        out_packet.duration = fps_ > 0 ? (1000 / fps_) : 0;
-        out_packet.pos = -1;
-
-        const int ret = av_interleaved_write_frame(fmt_ctx_, &out_packet);
-        if (ret < 0) {
-            LOG_ERROR("[Recorder] write mp4 packet failed name={} err={}",
-                      record_file_name_, ret);
-            close();
-            return false;
-        }
+    closeExpired(steadyNowMs());
+    cachePacket(packet);
+    if (!fmt_ctx_) {
+        return true;
     }
 
+    if (!writePacketInternal(packet)) {
+        close();
+        return false;
+    }
     return true;
 }
 
 void Recorder::closeExpired(int64_t now_ms) {
-    if (deadline_ms_ > 0 && now_ms >= deadline_ms_) {
+    if (fmt_ctx_ && deadline_ms_ > 0 && now_ms >= deadline_ms_) {
         close();
     }
+}
+
+bool Recorder::hasVideoStream() const {
+    return std::any_of(stream_specs_.begin(), stream_specs_.end(), [](const RtspStreamSpec& spec) {
+        return spec.media_type == MediaType::Video;
+    });
+}
+
+bool Recorder::isVideoPacket(const AVPacket& packet) const {
+    auto spec_it = std::find_if(stream_specs_.begin(), stream_specs_.end(), [&packet](const RtspStreamSpec& spec) {
+        return spec.input_stream_index == packet.stream_index;
+    });
+    return spec_it != stream_specs_.end() && spec_it->media_type == MediaType::Video;
+}
+
+void Recorder::cachePacket(const AVPacket& packet) {
+    const bool is_video = isVideoPacket(packet);
+    const bool is_keyframe = is_video && (packet.flags & AV_PKT_FLAG_KEY) != 0;
+    if (is_keyframe) {
+        gop_cache_.clear();
+    }
+    if (gop_cache_.empty() && !is_keyframe) {
+        return;
+    }
+
+    auto cloned_packet = media_agent::clonePacket(packet);
+    if (!cloned_packet) {
+        LOG_WARN("[Recorder] clone packet for GOP cache failed stream={}", stream_id_);
+        return;
+    }
+
+    gop_cache_.push_back(CachedPacket{std::move(cloned_packet)});
+}
+
+void Recorder::clearPacketCache() {
+    gop_cache_.clear();
+}
+
+bool Recorder::flushCachedGop() {
+    for (const CachedPacket& cached_packet : gop_cache_) {
+        if (!cached_packet.packet) {
+            continue;
+        }
+        if (!writePacketInternal(*cached_packet.packet)) {
+            LOG_ERROR("[Recorder] flush GOP cache failed file={}", record_file_name_);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Recorder::writePacketInternal(const AVPacket& packet) {
+    if (!fmt_ctx_) {
+        return false;
+    }
+
+    const auto stream_state_it = stream_states_.find(packet.stream_index);
+    if (stream_state_it == stream_states_.end() || !stream_state_it->second.stream) {
+        return false;
+    }
+    const auto& stream_state = stream_state_it->second;
+
+    auto mux_packet = media_agent::clonePacket(packet);
+    if (!mux_packet) {
+        LOG_ERROR("[Recorder] clone packet for mux failed file={}", record_file_name_);
+        return false;
+    }
+
+    mux_packet->stream_index = stream_state.stream->index;
+    mux_packet->pos = -1;
+
+    const int64_t first_ts = mux_packet->dts != AV_NOPTS_VALUE ? mux_packet->dts : mux_packet->pts;
+    if (start_pts_us_ < 0 && first_ts != AV_NOPTS_VALUE) {
+        start_pts_us_ = av_rescale_q(first_ts, stream_state.spec.time_base, AV_TIME_BASE_Q);
+    }
+
+    if (start_pts_us_ >= 0) {
+        if (mux_packet->pts != AV_NOPTS_VALUE) {
+            const int64_t pts_us = av_rescale_q(mux_packet->pts, stream_state.spec.time_base, AV_TIME_BASE_Q);
+            mux_packet->pts = av_rescale_q(std::max<int64_t>(0, pts_us - start_pts_us_),
+                                           AV_TIME_BASE_Q,
+                                           stream_state.stream->time_base);
+        }
+        if (mux_packet->dts != AV_NOPTS_VALUE) {
+            const int64_t dts_us = av_rescale_q(mux_packet->dts, stream_state.spec.time_base, AV_TIME_BASE_Q);
+            mux_packet->dts = av_rescale_q(std::max<int64_t>(0, dts_us - start_pts_us_),
+                                           AV_TIME_BASE_Q,
+                                           stream_state.stream->time_base);
+        }
+    } else {
+        av_packet_rescale_ts(mux_packet.get(), stream_state.spec.time_base, stream_state.stream->time_base);
+    }
+
+    if (mux_packet->duration > 0) {
+        mux_packet->duration = av_rescale_q(mux_packet->duration,
+                                            stream_state.spec.time_base,
+                                            stream_state.stream->time_base);
+    }
+    const int ret = av_interleaved_write_frame(fmt_ctx_, mux_packet.get());
+    if (ret < 0) {
+        LOG_ERROR("[Recorder] write mp4 frame failed file={} err={}",
+                  record_file_name_, ffmpegErrorString(ret));
+        return false;
+    }
+
+    return true;
 }
 
 void Recorder::close() {
@@ -149,7 +265,7 @@ void Recorder::close() {
         deadline_ms_ = 0;
         record_file_name_.clear();
         record_tmp_file_name_.clear();
-        start_pts_ms_ = -1;
+        start_pts_us_ = -1;
         return;
     }
 
@@ -159,7 +275,7 @@ void Recorder::close() {
     }
     avformat_free_context(fmt_ctx_);
     fmt_ctx_ = nullptr;
-    stream_ = nullptr;
+    stream_states_.clear();
 
     const std::filesystem::path tmp_path = std::filesystem::path(base_dir_) / record_tmp_file_name_;
     const std::filesystem::path final_path = std::filesystem::path(base_dir_) / record_file_name_;
@@ -167,18 +283,18 @@ void Recorder::close() {
     std::error_code ec;
     std::filesystem::rename(tmp_path, final_path, ec);
     if (ec) {
-        LOG_WARN("[Recorder] rename alarm record failed: {} -> {} err={}",
+        LOG_WARN("[Recorder] rename record failed: {} -> {} err={}",
                  tmp_path.string(), final_path.string(), ec.message());
     }
 
     deadline_ms_ = 0;
-    start_pts_ms_ = -1;
+    start_pts_us_ = -1;
     record_file_name_.clear();
     record_tmp_file_name_.clear();
 }
 
-bool Recorder::openRecording(const std::string& stream_id) {
-    record_file_name_ = buildRecordingFileName(stream_id, "mp4");
+bool Recorder::openRecording() {
+    record_file_name_ = buildRecordingFileName(stream_id_, "mp4");
     record_tmp_file_name_ = makeHiddenRecordingName(record_file_name_);
 
     const std::filesystem::path output_path = std::filesystem::path(base_dir_) / record_tmp_file_name_;
@@ -188,36 +304,27 @@ bool Recorder::openRecording(const std::string& stream_id) {
     int ret = avformat_alloc_output_context2(&fmt_ctx, nullptr, "mp4", output_path.c_str());
     if (ret < 0 || !fmt_ctx) {
         LOG_ERROR("[Recorder] stream={} alloc mp4 context failed path={} err={}",
-                  stream_id, output_path.string(), ret);
+                  stream_id_, output_path.string(), ffmpegErrorString(ret));
         record_file_name_.clear();
         record_tmp_file_name_.clear();
         return false;
     }
 
-    AVStream* stream = avformat_new_stream(fmt_ctx, nullptr);
-    if (!stream) {
-        LOG_ERROR("[Recorder] stream={} create mp4 stream failed", stream_id);
+    std::unordered_map<int, OutputStreamState> stream_states;
+    if (!buildOutputStreamMap(fmt_ctx, stream_specs_, stream_states)) {
+        LOG_ERROR("[Recorder] stream={} build output streams failed tracks={}",
+                  stream_id_, stream_specs_.size());
         avformat_free_context(fmt_ctx);
         record_file_name_.clear();
         record_tmp_file_name_.clear();
         return false;
     }
 
-    stream->id = 0;
-    stream->time_base = AVRational{1, 1000};
-    stream->avg_frame_rate = AVRational{fps_, 1};
-    stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-    stream->codecpar->codec_id = codecIdFromEncoderType(type_);
-    stream->codecpar->codec_tag = 0;
-    stream->codecpar->width = width_;
-    stream->codecpar->height = height_;
-    stream->codecpar->bit_rate = bitrate_;
-
     if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         ret = avio_open(&fmt_ctx->pb, output_path.c_str(), AVIO_FLAG_WRITE);
         if (ret < 0) {
             LOG_ERROR("[Recorder] stream={} open mp4 file failed path={} err={}",
-                      stream_id, output_path.string(), ret);
+                      stream_id_, output_path.string(), ffmpegErrorString(ret));
             avformat_free_context(fmt_ctx);
             record_file_name_.clear();
             record_tmp_file_name_.clear();
@@ -228,7 +335,7 @@ bool Recorder::openRecording(const std::string& stream_id) {
     ret = avformat_write_header(fmt_ctx, nullptr);
     if (ret < 0) {
         LOG_ERROR("[Recorder] stream={} write mp4 header failed path={} err={}",
-                  stream_id, output_path.string(), ret);
+                  stream_id_, output_path.string(), ffmpegErrorString(ret));
         if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE) && fmt_ctx->pb) {
             avio_closep(&fmt_ctx->pb);
         }
@@ -239,12 +346,14 @@ bool Recorder::openRecording(const std::string& stream_id) {
     }
 
     fmt_ctx_ = fmt_ctx;
-    stream_ = stream;
-    start_pts_ms_ = -1;
+    stream_states_ = std::move(stream_states);
+    start_pts_us_ = -1;
 
-    LOG_INFO("[Recorder] stream={} start alarm record file={}",
-             stream_id,
-             (std::filesystem::path(base_dir_) / record_file_name_).string());
+    LOG_INFO("[Recorder] stream={} start record file={} cached_packets={} tracks={}",
+             stream_id_,
+             (std::filesystem::path(base_dir_) / record_file_name_).string(),
+             gop_cache_.size(),
+             stream_states_.size());
     return true;
 }
 

@@ -62,21 +62,6 @@ std::shared_ptr<DmaImage> buildDecodedImage(MppFrame frame) {
     return image;
 }
 
-std::shared_ptr<AVPacket> clonePacket(const AVPacket* packet) {
-    if (!packet) {
-        return nullptr;
-    }
-    AVPacket* cloned = av_packet_clone(packet);
-    if (!cloned) {
-        return nullptr;
-    }
-    return std::shared_ptr<AVPacket>(cloned, [](AVPacket* pkt) {
-        if (pkt) {
-            av_packet_free(&pkt);
-        }
-    });
-}
-
 int64_t toMillis(int64_t value, AVRational time_base) {
     if (value == AV_NOPTS_VALUE || time_base.num <= 0 || time_base.den <= 0) {
         return 0;
@@ -100,11 +85,13 @@ int RTSPPuller::ffmpegInterruptCallback(void* opaque) {
 RTSPPuller::RTSPPuller(StreamConfig cfg,
                        std::shared_ptr<IStreamBuffer> stream_buffer,
                        FrameReadyCallback frame_ready_cb,
-                       StreamReadyCallback stream_ready_cb)
+                 StreamReadyCallback stream_ready_cb,
+                 PacketCallback packet_cb)
     : cfg_(std::move(cfg)),
       stream_buffer_(std::move(stream_buffer)),
       frame_ready_cb_(std::move(frame_ready_cb)),
-      stream_ready_cb_(std::move(stream_ready_cb)) {}
+    stream_ready_cb_(std::move(stream_ready_cb)),
+    packet_cb_(std::move(packet_cb)) {}
 
 RTSPPuller::~RTSPPuller() { stop(); }
 
@@ -167,7 +154,7 @@ void RTSPPuller::pullLoop() {
             }
 
             AVStream* input_stream = fmt_ctx_->streams[pkt->stream_index];
-            auto cloned_packet = clonePacket(pkt);
+            auto cloned_packet = media_agent::clonePacket(pkt);
             if (!cloned_packet) {
                 av_packet_unref(pkt);
                 continue;
@@ -183,12 +170,17 @@ void RTSPPuller::pullLoop() {
             encoded_packet->is_keyframe = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
             encoded_packet->enqueue_mono_ms = steadyNowMs();
 
+            if (packet_cb_) {
+                packet_cb_(encoded_packet->packet);
+            }
+
             if (pkt->stream_index == video_stream_idx_) {
                 encoded_packet->media_type = MediaType::Video;
                 encoded_packet->frame_id = next_frame_id_;
                 Statistics::instance().incRtspPullFrame(cfg_.stream_id());
                 if (stream_buffer_) {
                     stream_buffer_->enqueuePacket(encoded_packet);
+                    Statistics::instance().setRemainPacketSize(cfg_.stream_id(), stream_buffer_->packetCount());
                 }
 
                 pending_video_frames_.push_back(PendingVideoFrameMeta{
@@ -336,8 +328,9 @@ std::vector<RtspStreamSpec> RTSPPuller::buildInputStreamSpecs() const {
         spec.media_type = media_type;
         spec.input_stream_index = stream_index;
         spec.codec_id = par->codec_id;
-        spec.time_base_num = stream->time_base.num;
-        spec.time_base_den = stream->time_base.den;
+        spec.time_base = stream->time_base;
+        spec.fps = media_type == MediaType::Video ? fpsFromStream(stream) : 0;
+        spec.bit_rate = par->bit_rate > 0 ? static_cast<int>(par->bit_rate) : 0;
         spec.width = par->width;
         spec.height = par->height;
         spec.sample_rate = par->sample_rate;
