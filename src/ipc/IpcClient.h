@@ -1,66 +1,60 @@
-#pragma once
+#pragma once  // 防止头文件重复包含。
 
-#include "SocketSender.h"
-#include "common/Config.h"
-#include "media-agent.pb.h"
-#include <functional>
-#include <memory>
-#include <string>
-#include <atomic>
+#include "SocketSender.h"    // 纯 socket 传输层。
+#include "common/Config.h"   // SocketConfig。
+#include "media-agent.pb.h"  // Envelope / AgentConfig 等协议结构。
+#include <functional>         // std::function。
+#include <memory>             // std::unique_ptr。
+#include <string>             // std::string。
+#include <atomic>             // std::atomic<uint32_t>。
+#include <cstdint>            // uint64_t。
 
 namespace media_agent {
 
-/**
- * IPC 业务层客户端
- *
- * 职责：Protobuf Envelope 的解析、配置下发分发与消息发送。
- *       业务消息体和 Envelope 的组装由 protocol mapper 负责，底层传输委托给 SocketSender。
- *
- * 调用方（Pipeline）通过 pushAlarm() / pushHeartbeat() 发送业务消息，
- * 通过 setConfigCallback() 接收对端下发的配置。
- */
+// IPC 业务层客户端。
+// 它位于 Pipeline 和底层 SocketSender 之间，负责协议解析与业务分发。
 class IpcClient {
 public:
-    explicit IpcClient(SocketConfig cfg);
-    ~IpcClient();
+    explicit IpcClient(SocketConfig cfg); // 构造时保存 socket 配置。
+    ~IpcClient();                         // 析构时自动 stop。
 
-    IpcClient(const IpcClient&) = delete;
-    IpcClient& operator=(const IpcClient&) = delete;
+    IpcClient(const IpcClient&) = delete;            // 禁止拷贝。
+    IpcClient& operator=(const IpcClient&) = delete; // 禁止赋值。
 
-    bool start();
-    void stop();
+    bool start(); // 启动底层 socket 连接与收发线程。
+    void stop();  // 停止底层收发线程。
 
-    /** 推入报警（非阻塞，队满自动丢弃最旧条目） */
+    // 发送一条告警消息。
     bool pushAlarm(AlarmInfo alarm);
 
-    /** 推入心跳（由 Pipeline 定期调用） */
+    // 发送一条心跳消息。
     bool pushHeartbeat(HeartBeat heartbeat);
 
+    // 查询底层连接是否正在运行。
     bool isRunning() const { return sender_ && sender_->isRunning(); }
 
-    // 统计（透传给传输层）
-    uint64_t sentCount()      const { return sender_ ? sender_->sentCount()      : 0; }
-    uint64_t failedCount()    const { return sender_ ? sender_->failedCount()    : 0; }
+    // 以下三个接口只是透传底层统计值，便于上层查看 IPC 健康状况。
+    uint64_t sentCount() const { return sender_ ? sender_->sentCount() : 0; }
+    uint64_t failedCount() const { return sender_ ? sender_->failedCount() : 0; }
     uint64_t reconnectCount() const { return sender_ ? sender_->reconnectCount() : 0; }
 
-    /**
-     * 注册配置下发回调（需在 start() 前设置）
-     * 对端发来 MSG_CONFIG 时在接收线程上调用，回调应尽快返回
-     */
+    // 配置下发回调。
+    // 当收到 MSG_CONFIG 时，会把 AgentConfig 回调给 Pipeline。
     using ConfigCallback = std::function<void(const ::media_agent::AgentConfig&)>;
     void setConfigCallback(ConfigCallback cb);
 
 private:
-    // 被传输层 recvLoop 调用
+    // 底层接收到原始 payload 后，会回调到这里做 Envelope 解析。
     void onRecv(const std::string& payload);
+
+    // 处理一份已经解析好的 AgentConfig。
     void handleConfig(const ::media_agent::AgentConfig& cfg);
 
-    SocketConfig               cfg_;
-    std::unique_ptr<SocketSender> sender_;
+    SocketConfig cfg_;                    // 当前客户端配置。
+    std::unique_ptr<SocketSender> sender_; // 真实负责传输的对象。
 
-    ConfigCallback config_cb_;
-    std::atomic<uint32_t> seq_{0};
+    ConfigCallback config_cb_;           // 上层注册的配置处理回调。
+    std::atomic<uint32_t> seq_{0};       // 递增消息序号，用于发送 Envelope。
 };
 
 } // namespace media_agent
-

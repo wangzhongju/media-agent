@@ -1,16 +1,18 @@
-#pragma once
+#pragma once  // 防止头文件重复包含。
 
-#include "stream/MppEncoder.h"
+#include "stream/MppEncoder.h" // MppEncoderType。
 
-#include <cstdint>
-#include <string>
-#include <vector>
+#include <cstdint> // int64_t。
+#include <string>  // std::string。
+#include <vector>  // MppPacket 列表。
 
 struct AVFormatContext;
 struct AVStream;
 
 namespace media_agent {
 
+// 告警录制器。
+// 它把编码好的 MppPacket 持续写入一个 MP4 文件，直到录制时间到期。
 class Recorder {
 public:
     Recorder() = default;
@@ -42,18 +44,18 @@ private:
     static std::string makeHiddenRecordingName(const std::string& visible_name);
     bool openRecording(const std::string& stream_id);
 
-    std::string      base_dir_;
-    std::string      record_file_name_;
-    std::string      record_tmp_file_name_;
-    MppEncoderType   type_ = MppEncoderType::H264;
-    int              width_ = 0;
-    int              height_ = 0;
-    int              fps_ = 25;
-    int              bitrate_ = 0;
-    int64_t          deadline_ms_ = 0;
-    int64_t          start_pts_ms_ = -1;
+    std::string base_dir_;
+    std::string record_file_name_;
+    std::string record_tmp_file_name_;
+    MppEncoderType type_ = MppEncoderType::H264;
+    int width_ = 0;
+    int height_ = 0;
+    int fps_ = 25;
+    int bitrate_ = 0;
+    int64_t deadline_ms_ = 0;
+    int64_t start_pts_ms_ = -1;
     AVFormatContext* fmt_ctx_ = nullptr;
-    AVStream*        stream_ = nullptr;
+    AVStream* stream_ = nullptr;
 };
 
 } // namespace media_agent

@@ -1,4 +1,4 @@
-#include "Recorder.h"
+#include "Recorder.h" // Recorder 实现。
 
 #include "common/Logger.h"
 #include "common/Time.h"
@@ -18,7 +18,7 @@ namespace media_agent {
 
 namespace {
 
-constexpr int kDefaultAlarmRecordDurationS = 10;
+constexpr int kDefaultAlarmRecordDurationS = 10; // 默认录制时长 10 秒。
 
 AVCodecID codecIdFromEncoderType(MppEncoderType type) {
     switch (type) {
@@ -129,7 +129,8 @@ bool Recorder::writePackets(const std::vector<MppPacket>& packets) {
         const int ret = av_interleaved_write_frame(fmt_ctx_, &out_packet);
         if (ret < 0) {
             LOG_ERROR("[Recorder] write mp4 packet failed name={} err={}",
-                      record_file_name_, ret);
+                      record_file_name_,
+                      ret);
             close();
             return false;
         }
@@ -168,7 +169,9 @@ void Recorder::close() {
     std::filesystem::rename(tmp_path, final_path, ec);
     if (ec) {
         LOG_WARN("[Recorder] rename alarm record failed: {} -> {} err={}",
-                 tmp_path.string(), final_path.string(), ec.message());
+                 tmp_path.string(),
+                 final_path.string(),
+                 ec.message());
     }
 
     deadline_ms_ = 0;
@@ -188,7 +191,9 @@ bool Recorder::openRecording(const std::string& stream_id) {
     int ret = avformat_alloc_output_context2(&fmt_ctx, nullptr, "mp4", output_path.c_str());
     if (ret < 0 || !fmt_ctx) {
         LOG_ERROR("[Recorder] stream={} alloc mp4 context failed path={} err={}",
-                  stream_id, output_path.string(), ret);
+                  stream_id,
+                  output_path.string(),
+                  ret);
         record_file_name_.clear();
         record_tmp_file_name_.clear();
         return false;
@@ -217,7 +222,9 @@ bool Recorder::openRecording(const std::string& stream_id) {
         ret = avio_open(&fmt_ctx->pb, output_path.c_str(), AVIO_FLAG_WRITE);
         if (ret < 0) {
             LOG_ERROR("[Recorder] stream={} open mp4 file failed path={} err={}",
-                      stream_id, output_path.string(), ret);
+                      stream_id,
+                      output_path.string(),
+                      ret);
             avformat_free_context(fmt_ctx);
             record_file_name_.clear();
             record_tmp_file_name_.clear();
@@ -228,7 +235,9 @@ bool Recorder::openRecording(const std::string& stream_id) {
     ret = avformat_write_header(fmt_ctx, nullptr);
     if (ret < 0) {
         LOG_ERROR("[Recorder] stream={} write mp4 header failed path={} err={}",
-                  stream_id, output_path.string(), ret);
+                  stream_id,
+                  output_path.string(),
+                  ret);
         if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE) && fmt_ctx->pb) {
             avio_closep(&fmt_ctx->pb);
         }

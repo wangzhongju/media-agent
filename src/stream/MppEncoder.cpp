@@ -1,6 +1,6 @@
-#include "MppEncoder.h"
+#include "MppEncoder.h" // MppEncoder 实现。
 
-#include "common/Logger.h"
+#include "common/Logger.h" // 日志输出。
 
 extern "C" {
 #include <rockchip/mpp_buffer.h>
@@ -15,7 +15,7 @@ namespace media_agent {
 
 namespace {
 
-constexpr int kDefaultFps = 25;
+constexpr int kDefaultFps = 25; // 默认帧率兜底值。
 
 } // namespace
 
@@ -28,17 +28,17 @@ MppCodingType MppEncoder::toMppCoding(MppEncoderType type) {
         case MppEncoderType::H264: return MPP_VIDEO_CodingAVC;
         case MppEncoderType::H265: return MPP_VIDEO_CodingHEVC;
         case MppEncoderType::JPEG: return MPP_VIDEO_CodingMJPEG;
-        default:                   return MPP_VIDEO_CodingUnused;
+        default: return MPP_VIDEO_CodingUnused;
     }
 }
 
 MppFrameFormat MppEncoder::toMppFrameFormat(image_format_t format) {
     switch (format) {
-        case IMAGE_FORMAT_RGB888:        return MPP_FMT_RGB888;
-        case IMAGE_FORMAT_RGBA8888:      return MPP_FMT_RGBA8888;
+        case IMAGE_FORMAT_RGB888: return MPP_FMT_RGB888;
+        case IMAGE_FORMAT_RGBA8888: return MPP_FMT_RGBA8888;
         case IMAGE_FORMAT_YUV420SP_NV21: return MPP_FMT_YUV420SP_VU;
         case IMAGE_FORMAT_YUV420SP_NV12: return MPP_FMT_YUV420SP;
-        default:                         return MPP_FMT_BUTT;
+        default: return MPP_FMT_BUTT;
     }
 }
 
@@ -47,7 +47,7 @@ const char* MppEncoder::typeName(MppEncoderType type) {
         case MppEncoderType::H264: return "h264";
         case MppEncoderType::H265: return "h265";
         case MppEncoderType::JPEG: return "jpeg";
-        default:                   return "unknown";
+        default: return "unknown";
     }
 }
 
@@ -62,21 +62,24 @@ bool MppEncoder::init(MppEncoderType type,
                       int bitrate) {
     destroy();
 
-    type_      = type;
-    coding_    = toMppCoding(type);
+    type_ = type;
+    coding_ = toMppCoding(type);
     input_fmt_ = input_fmt;
-    width_     = width;
-    height_    = height;
+    width_ = width;
+    height_ = height;
     hor_stride_ = hor_stride;
     ver_stride_ = ver_stride;
-    fps_       = fps > 0 ? fps : kDefaultFps;
-    bitrate_   = bitrate > 0 ? bitrate : (width_ * height_ * fps_) / 8;
+    fps_ = fps > 0 ? fps : kDefaultFps;
+    bitrate_ = bitrate > 0 ? bitrate : (width_ * height_ * fps_) / 8;
     stream_id_ = stream_id;
 
     if (coding_ == MPP_VIDEO_CodingUnused || width_ <= 0 || height_ <= 0 ||
         hor_stride_ <= 0 || ver_stride_ <= 0) {
         LOG_ERROR("[MppEncoder] stream={} invalid init args type={} size={}x{}",
-                  stream_id_, typeName(type_), width_, height_);
+                  stream_id_,
+                  typeName(type_),
+                  width_,
+                  height_);
         return false;
     }
 
@@ -85,7 +88,9 @@ bool MppEncoder::init(MppEncoderType type,
         case MPP_FMT_RGB888:
             if ((width_ % 8) != 0) {
                 LOG_ERROR("[MppEncoder] stream={} {} input requires width aligned to 8 for zero-copy, got {}",
-                          stream_id_, typeName(type_), width_);
+                          stream_id_,
+                          typeName(type_),
+                          width_);
                 return false;
             }
             break;
@@ -95,7 +100,9 @@ bool MppEncoder::init(MppEncoderType type,
         case MPP_FMT_ABGR8888:
             if ((width_ % 8) != 0) {
                 LOG_ERROR("[MppEncoder] stream={} {} input requires width aligned to 8 for zero-copy, got {}",
-                          stream_id_, typeName(type_), width_);
+                          stream_id_,
+                          typeName(type_),
+                          width_);
                 return false;
             }
             break;
@@ -104,13 +111,16 @@ bool MppEncoder::init(MppEncoderType type,
         case MPP_FMT_YUV420P:
             if ((width_ & 1) != 0 || (height_ & 1) != 0) {
                 LOG_ERROR("[MppEncoder] stream={} yuv420 input requires even size, got {}x{}",
-                          stream_id_, width_, height_);
+                          stream_id_,
+                          width_,
+                          height_);
                 return false;
             }
             break;
         default:
             LOG_ERROR("[MppEncoder] stream={} unsupported input fmt={} for zero-copy encoder",
-                      stream_id_, static_cast<int>(input_fmt_));
+                      stream_id_,
+                      static_cast<int>(input_fmt_));
             return false;
     }
 
@@ -151,20 +161,29 @@ bool MppEncoder::init(MppEncoderType type,
         ret = mpi_->control(ctx_, MPP_ENC_SET_HEADER_MODE, &header_mode);
         if (ret != MPP_OK) {
             LOG_ERROR("[MppEncoder] stream={} set header mode failed ret={}",
-                      stream_id_, static_cast<int>(ret));
+                      stream_id_,
+                      static_cast<int>(ret));
             destroy();
             return false;
         }
     }
 
     LOG_INFO("[MppEncoder] stream={} initialized type={} size={}x{} fmt={} fps={} bitrate={}",
-             stream_id_, typeName(type_), width_, height_, static_cast<int>(input_fmt_), fps_, bitrate_);
+             stream_id_,
+             typeName(type_),
+             width_,
+             height_,
+             static_cast<int>(input_fmt_),
+             fps_,
+             bitrate_);
     initialized_ = true;
     return true;
 }
 
 bool MppEncoder::configure() {
-    if (!cfg_ || !ctx_ || !mpi_) return false;
+    if (!cfg_ || !ctx_ || !mpi_) {
+        return false;
+    }
 
     mpp_enc_cfg_set_s32(cfg_, "prep:width", width_);
     mpp_enc_cfg_set_s32(cfg_, "prep:height", height_);
@@ -222,7 +241,8 @@ bool MppEncoder::configure() {
     const MPP_RET ret = mpi_->control(ctx_, MPP_ENC_SET_CFG, cfg_);
     if (ret != MPP_OK) {
         LOG_ERROR("[MppEncoder] stream={} MPP_ENC_SET_CFG failed ret={}",
-                  stream_id_, static_cast<int>(ret));
+                  stream_id_,
+                  static_cast<int>(ret));
         return false;
     }
 
@@ -262,8 +282,8 @@ MppBuffer MppEncoder::importExternalBuffer(const DmaImage& image) {
 
     MppBufferInfo info = {};
     info.type = MPP_BUFFER_TYPE_EXT_DMA;
-    info.fd   = image.fd;
-    info.ptr  = image.virt_addr;
+    info.fd = image.fd;
+    info.ptr = image.virt_addr;
     info.size = image.size;
     info.index = -1;
 
@@ -271,7 +291,9 @@ MppBuffer MppEncoder::importExternalBuffer(const DmaImage& image) {
     const MPP_RET ret = mpp_buffer_import(&buffer, &info);
     if (ret != MPP_OK || !buffer) {
         LOG_WARN("[MppEncoder] stream={} import ext dma failed fd={} ret={}",
-                 stream_id_, image.fd, static_cast<int>(ret));
+                 stream_id_,
+                 image.fd,
+                 static_cast<int>(ret));
         return nullptr;
     }
 
@@ -282,10 +304,14 @@ MppBuffer MppEncoder::importExternalBuffer(const DmaImage& image) {
 bool MppEncoder::encodeImage(const std::shared_ptr<DmaImage>& image,
                              int64_t pts,
                              std::vector<MppPacket>& out_packets) {
-    if (!initialized_ || !ctx_ || !mpi_ || !image) return false;
+    if (!initialized_ || !ctx_ || !mpi_ || !image) {
+        return false;
+    }
 
     MppBuffer buffer = importExternalBuffer(*image);
-    if (!buffer) return false;
+    if (!buffer) {
+        return false;
+    }
 
     MppFrame frame = nullptr;
     if (mpp_frame_init(&frame) != MPP_OK || !frame) {
@@ -317,7 +343,9 @@ bool MppEncoder::encodeImage(const std::shared_ptr<DmaImage>& image,
 }
 
 bool MppEncoder::flush(std::vector<MppPacket>& out_packets) {
-    if (!initialized_ || !ctx_ || !mpi_) return false;
+    if (!initialized_ || !ctx_ || !mpi_) {
+        return false;
+    }
 
     MppFrame frame = nullptr;
     if (mpp_frame_init(&frame) != MPP_OK || !frame) {
@@ -353,7 +381,9 @@ bool MppEncoder::forceIdr() {
 }
 
 void MppEncoder::drainPackets(std::vector<MppPacket>& out_packets) {
-    if (!ctx_ || !mpi_) return;
+    if (!ctx_ || !mpi_) {
+        return;
+    }
 
     while (true) {
         MppPacket packet = nullptr;
