@@ -7,13 +7,40 @@ package media_agent;
 option go_package = "server_demo/pb";
 
 // ─────────────────────────────────────────────────────────
+// 检测类型
+enum DetectionType {
+    DET_UNKNOWN = 0; // 未知
+    DET_PERSON  = 1; // 人
+    DET_CAR     = 2; // 车
+    DET_HELMET  = 3; // 头盔/安全帽
+    DET_SMOKE   = 4; // 吸烟
+    // ... 其他类型
+}
+
+// 目标类型过滤策略
+message TargetFilter {
+    // allowlist：为空表示“不过滤/全部允许”
+    repeated DetectionType allow_types = 1;
+
+    // denylist：优先级高于 allow（例如 allow=person,car 但 deny=car）
+    repeated DetectionType deny_types  = 2;
+
+    // 可选：按类型阈值覆盖 stream/算法阈值
+    message TypeThreshold {
+        DetectionType type = 1;
+        float threshold = 2; // [0,1]
+    }
+    repeated TypeThreshold per_type_threshold = 3;
+}
+
+// ─────────────────────────────────────────────────────────
 // 归一化的矩形框（可旋转） [0,1]
 message Box {
-    float cx     = 1; // 中心 x
-    float cy     = 2; // 中心 y
+    float x      = 1;  // 左上角 x
+    float y      = 2;  // 左上角 y
     float width  = 3;
     float height = 4;
-    float angle  = 5; // 旋转角度（度）
+    float angle  = 5;  // 旋转角度（度）
 }
 
 // 归一化的点 [0,1]
@@ -29,7 +56,7 @@ message Polygon {
 
 // ROI：支持多边形/矩形框
 message RoiArea {
-    bool enabled = 1; // 是否启用
+    bool enabled = 1;               // 是否启用
 
     // ROI 语义：INCLUDE=只在 ROI 内生效；EXCLUDE=ROI 内忽略（黑名单区域）
     enum RoiMode {
@@ -40,7 +67,7 @@ message RoiArea {
     RoiMode mode = 2;
 
     oneof shape {
-        Box         rect = 10; // 矩形/旋转矩形
-        Polygon     poly = 11; // 多边形
+        Box         rect = 10;  // 矩形/旋转矩形
+        Polygon     poly = 11;  // 多边形
     }
 }

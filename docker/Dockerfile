@@ -2,17 +2,16 @@
 # Stage 1: 编译镜像
 # 基础镜像：Ubuntu 20.04 (适配 RK3588 BSP 工具链)
 # ─────────────────────────────────────────────────────────
-# FROM ubuntu:20.04 AS builder
-FROM docker.1ms.run/library/ubuntu:20.04 AS builder
+FROM ubuntu:20.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.aliyun.com/ubuntu-ports|g' /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
+    ninja-build \
     pkg-config \
-    libeigen3-dev \
+    git \
     # FFmpeg 开发库
     libavcodec-dev \
     libavformat-dev \
@@ -28,32 +27,29 @@ WORKDIR /build
 # 拷贝源码
 COPY . .
 
-# 编译并安装到临时 install 根目录（对齐 Debian: /opt/media_agent）
+# 编译
 RUN cmake -B build -S . \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/opt/media_agent \
-    && cmake --build build --parallel $(nproc) \
-    && DESTDIR=/install cmake --install build
+        -G Ninja \
+    && cmake --build build --parallel $(nproc)
 
 # ─────────────────────────────────────────────────────────
 # Stage 2: 运行镜像（精简）
 # ─────────────────────────────────────────────────────────
-# FROM ubuntu:20.04 AS runtime
-FROM docker.1ms.run/library/ubuntu:20.04 AS runtime
+FROM ubuntu:20.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG VIDEO_GID=44
 ARG RENDER_GID=109
 
-RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.aliyun.com/ubuntu-ports|g' /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # FFmpeg 运行时
-    libavcodec58 \
-    libavformat58 \
-    libavutil56 \
-    libswscale5 \
+    libavcodec59 \
+    libavformat59 \
+    libavutil57 \
+    libswscale6 \
     # Protobuf 运行时
-    libprotobuf17 \
+    libprotobuf23 \
     # 时区
     tzdata \
     && rm -rf /var/lib/apt/lists/*
@@ -68,21 +64,26 @@ RUN set -eux; \
     if getent group render >/dev/null; then groupmod -o -g "${RENDER_GID}" render; else groupadd -g "${RENDER_GID}" render; fi; \
     useradd -m -u 1000 -G video,render agent
 
-WORKDIR /opt/media_agent
-ENV LD_LIBRARY_PATH=/opt/media_agent/lib
+WORKDIR /app
 
-# 从 install 目录拷贝产物到 /opt
-COPY --from=builder /install/opt/ /opt/
+# 从编译阶段拷贝产物
+COPY --from=builder /build/build/bin/media_agent /app/media_agent
+COPY --from=builder /build/config/config.json    /app/config/config.json
+COPY --from=builder /build/third_party/edgeInfer/lib/ /usr/local/lib/
+COPY --from=builder /build/third_party/edgeInfer/weights/ /opt/models/edgeInfer/
 
-RUN ldconfig
+# 日志目录
+RUN mkdir -p /var/log/media_agent \
+    && chown agent:agent /var/log/media_agent \
+    && ldconfig
 
-# 默认内置 edgeDeploy 运行库与模型；如宿主机挂载 /opt/media_agent/models 会覆盖镜像内模型
+# 默认内置 EdgeInfer 运行库与模型；如宿主机挂载 /opt/models 会覆盖镜像内模型
 
 USER agent
 
 # Unix Socket 路径由宿主机挂载（与上级平台共享）
 VOLUME ["/tmp"]
 
-ENTRYPOINT ["/opt/media_agent/media_agent"]
-CMD ["/opt/media_agent/config/config.json"]
+ENTRYPOINT ["/app/media_agent"]
+CMD ["/app/config/config.json"]
 

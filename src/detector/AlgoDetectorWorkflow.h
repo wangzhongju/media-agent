@@ -2,12 +2,8 @@
 
 #include "IDetector.h"
 #include "infer/edgeInfer.h"
-#include "tracker/ITracker.h"
 
-#include <cstdint>
 #include <memory>
-#include <mutex>
-#include <unordered_map>
 #include <vector>
 
 namespace media_agent {
@@ -54,51 +50,13 @@ public:
              AlgoDetectContext& context) const override;
 };
 
-class FormatInferResultPostprocessStep : public IAlgoPostprocessStep {
+class InferenceResultPostprocessStep : public IAlgoPostprocessStep {
 public:
     void run(const FrameBundle& frame,
              const StreamConfig& cfg,
              const AlgoDetectContext& context,
              const std::vector<object_result>& raw_results,
              FrameInferenceResult& output) const override;
-};
-
-class TrackingPostprocessStep : public IAlgoPostprocessStep {
-public:
-    void run(const FrameBundle& frame,
-             const StreamConfig& cfg,
-             const AlgoDetectContext& context,
-             const std::vector<object_result>& raw_results,
-             FrameInferenceResult& output) const override;
-
-private:
-    bool ensureTrackerLocked(const TrackerConfig& tracker_cfg) const;
-
-    mutable std::mutex                tracker_mutex_;
-    mutable TrackerConfig             active_tracker_config_;
-    mutable bool                      tracker_initialized_for_config_ = false;
-    mutable std::unique_ptr<ITracker> tracker_;
-};
-
-class DeduplicateAlarmPostprocessStep : public IAlgoPostprocessStep {
-public:
-    void run(const FrameBundle& frame,
-             const StreamConfig& cfg,
-             const AlgoDetectContext& context,
-             const std::vector<object_result>& raw_results,
-             FrameInferenceResult& output) const override;
-
-private:
-    void pruneExpiredEntries(int64_t now_mono_ms,
-                             int64_t dedup_window_ms) const;
-    bool shouldKeepObject(const StreamConfig& cfg,
-                          const DetectionObject& object,
-                          int64_t now_mono_ms,
-                          int64_t dedup_window_ms) const;
-
-    mutable std::unordered_map<uint32_t, int64_t> last_alarm_by_object_id_mono_ms_;
-    mutable std::unordered_map<uint32_t, int64_t> last_alarm_by_class_id_mono_ms_;
-    mutable std::mutex                            dedup_mutex_;
 };
 
 std::vector<std::unique_ptr<IAlgoPreprocessStep>> createDefaultPreprocessSteps();

@@ -11,10 +11,10 @@
 #include "stream/RtspPublisher.h"
 #include "stream/Snapshotter.h"
 #include "stream/SeiInjector.h"
+#include "tracker/ITracker.h"
 
 #include <atomic>
 #include <condition_variable>
-#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,19 +30,25 @@ struct DetectorRuntimeEntry {
     std::unique_ptr<IDetector> detector;
 };
 
+struct TrackerRuntimeEntry {
+    std::mutex                mutex;
+    TrackerConfig             config;
+    std::unique_ptr<ITracker> tracker;
+};
+
 struct StreamContext {
     std::string                     stream_id;
-    StreamConfig                    transport_config;
-    StreamConfig                    runtime_config;
+    StreamConfig                    config;
     std::shared_ptr<IStreamBuffer>  buffer;
     std::shared_ptr<DetectorRuntimeEntry> detector_runtime;
+    std::shared_ptr<TrackerRuntimeEntry> tracker_runtime;
     std::atomic<int>                video_nal_length_size{0};
     std::mutex                      recorder_mutex;
     std::unique_ptr<Recorder>       recorder;
     std::mutex                      snapshot_mutex;
     std::unique_ptr<Snapshotter>    snapshotter;
     std::atomic<int64_t>            last_snapshot_trigger_mono_ms{0};
-    std::unique_ptr<RTSPPuller>     puller;
+    std::unique_ptr<RTSPPuller>      puller;
     std::unique_ptr<RtspPublisher>  publisher;
     std::thread                     publish_thread;
     std::atomic<bool>               stop_flag{false};
@@ -63,15 +69,13 @@ public:
 
 private:
     void handleSocketConfig(const ::media_agent::AgentConfig& cfg);
-    void mainLoop();
+    void configLoop();
     void heartbeatLoop();
     void inferLoop(int idx);
     void publishLoop(const std::shared_ptr<StreamContext>& stream);
 
-    void applyConfigBatch(const std::map<int32_t, AgentConfig>& configs);
+    void applyConfigBatch(const std::map<std::string, StreamConfig>& desired_streams);
     std::shared_ptr<StreamContext> buildStreamContext(const StreamConfig& config);
-    void updateStreamRuntime(const std::shared_ptr<StreamContext>& stream,
-                             const StreamConfig& runtime_config);
     void requestAsyncStopStream(const std::shared_ptr<StreamContext>& stream);
     void configureStreamRecorder(const std::shared_ptr<StreamContext>& stream,
                                  const std::vector<RtspStreamSpec>& specs);
@@ -101,7 +105,7 @@ private:
 
     std::mutex                   config_mutex_;
     std::condition_variable      config_cv_;
-    std::map<int32_t, AgentConfig> configs_;
+    std::map<std::string, StreamConfig> pending_streams_;
     bool                         has_pending_config_ = false;
     std::vector<std::shared_ptr<StreamContext>> pending_stop_streams_;
 

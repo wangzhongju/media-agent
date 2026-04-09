@@ -1,6 +1,5 @@
 #include "pipeline/Pipeline.h"
 
-#include "pipeline/ConfigFilter.h"
 #include "pipeline/Utils.h"
 
 #include "common/Logger.h"
@@ -8,10 +7,11 @@
 #include "common/Time.h"
 #include "detector/DetectorFactory.h"
 #include "protocol/MessageMapper.h"
+#include "tracker/TrackerFactory.h"
 
 #include <algorithm>
 #include <chrono>
-#include <map>
+#include <optional>
 #include <utility>
 
 namespace media_agent {
@@ -35,7 +35,7 @@ bool Pipeline::start() {
     const int statistics_interval_s = std::max(1, cfg_.pipeline.statistics_interval_s);
     Statistics::instance().start(static_cast<uint32_t>(statistics_interval_s * 1000));
     infer_scheduler_ = createRoundRobinInferScheduler();
-    sei_injector_ = createMspSeiInjector();
+    sei_injector_ = createPassthroughSeiInjector();
 
     ipc_ = std::make_unique<IpcClient>(cfg_.socket);
     ipc_->setConfigCallback(
@@ -52,11 +52,11 @@ bool Pipeline::start() {
         infer_threads_.emplace_back(&Pipeline::inferLoop, this, i);
     }
 
-    config_thread_ = std::thread(&Pipeline::mainLoop, this);
+    config_thread_ = std::thread(&Pipeline::configLoop, this);
     heartbeat_thread_ = std::thread(&Pipeline::heartbeatLoop, this);
     running_ = true;
 
-    LOG_INFO("[Pipeline] started runtime infer_threads={}", num_infer);
+    LOG_INFO("[Pipeline] started skeleton runtime infer_threads={}", num_infer);
     return true;
 }
 
@@ -111,7 +111,7 @@ void Pipeline::stop() {
 
     {
         std::lock_guard<std::mutex> lock(config_mutex_);
-        configs_.clear();
+        pending_streams_.clear();
         pending_stop_streams_.clear();
         has_pending_config_ = false;
     }
@@ -129,25 +129,36 @@ void Pipeline::stop() {
 void Pipeline::handleSocketConfig(const AgentConfig& cfg) {
     if (!cfg.agent_id().empty() && cfg.agent_id() != cfg_.socket.agent_id) {
         LOG_WARN("[Pipeline] ignore config for other agent local={} target={}",
-                 cfg_.socket.agent_id,
-                 cfg.agent_id());
+                 cfg_.socket.agent_id, cfg.agent_id());
         return;
+    }
+
+    std::map<std::string, StreamConfig> desired_streams;
+    for (const auto& stream : cfg.streams()) {
+        if (stream.stream_id().empty()) {
+            LOG_WARN("[Pipeline] skip stream with empty stream_id");
+            continue;
+        }
+        if (stream.rtsp_url().empty()) {
+            LOG_WARN("[Pipeline] skip stream={} with empty rtsp_url", stream.stream_id());
+            continue;
+        }
+        desired_streams[stream.stream_id()] = stream;
     }
 
     {
         std::lock_guard<std::mutex> lock(config_mutex_);
-        configs_[cfg.config_id()] = cfg;
-
+        pending_streams_ = std::move(desired_streams);
         has_pending_config_ = true;
     }
     config_cv_.notify_one();
 }
 
-void Pipeline::mainLoop() {
-    LOG_INFO("[Pipeline::mainLoop] started");
+void Pipeline::configLoop() {
+    LOG_INFO("[Pipeline::configLoop] started");
 
     while (!stop_flag_) {
-        std::map<int32_t, AgentConfig> configs;
+        std::map<std::string, StreamConfig> desired_streams;
         std::vector<std::shared_ptr<StreamContext>> streams_to_stop;
         bool has_config_update = false;
         {
@@ -161,29 +172,26 @@ void Pipeline::mainLoop() {
 
             has_config_update = has_pending_config_;
             if (has_config_update) {
-                configs = configs_;
+                desired_streams.swap(pending_streams_);
                 has_pending_config_ = false;
             }
             streams_to_stop.swap(pending_stop_streams_);
         }
 
-        // 异步关闭流
         for (auto& stream : streams_to_stop) {
             stopStream(stream);
         }
         if (has_config_update) {
-            applyConfigBatch(configs);
+            applyConfigBatch(desired_streams);
         }
     }
 
-    LOG_INFO("[Pipeline::mainLoop] exited");
+    LOG_INFO("[Pipeline::configLoop] exited");
 }
 
-void Pipeline::applyConfigBatch(const std::map<int32_t, AgentConfig>& configs) {
-    const auto desired_streams = buildMergedStreams(configs);
+void Pipeline::applyConfigBatch(const std::map<std::string, StreamConfig>& desired_streams) {
     std::vector<std::shared_ptr<StreamContext>> streams_to_stop;
     std::vector<StreamConfig> streams_to_start;
-    std::vector<std::pair<std::shared_ptr<StreamContext>, StreamConfig>> runtime_updates;
 
     {
         std::lock_guard<std::mutex> lock(streams_mutex_);
@@ -196,16 +204,11 @@ void Pipeline::applyConfigBatch(const std::map<int32_t, AgentConfig>& configs) {
                 continue;
             }
 
-            if (!isSameTransportStreamConfig(it->second->transport_config, desired_it->second)) {
+            if (!isSameStreamConfig(it->second->config, desired_it->second)) {
                 streams_to_stop.push_back(it->second);
                 it = streams_.erase(it);
                 streams_to_start.push_back(desired_it->second);
                 continue;
-            }
-
-            if (!isSameRuntimeStreamConfig(it->second->runtime_config, desired_it->second)) {
-                it->second->runtime_config = desired_it->second;
-                runtime_updates.emplace_back(it->second, desired_it->second);
             }
             ++it;
         }
@@ -219,10 +222,6 @@ void Pipeline::applyConfigBatch(const std::map<int32_t, AgentConfig>& configs) {
 
     for (const auto& stream : streams_to_stop) {
         stopStream(stream);
-    }
-
-    for (auto& [stream, runtime_config] : runtime_updates) {
-        updateStreamRuntime(stream, runtime_config);
     }
 
     for (const auto& config : streams_to_start) {
@@ -252,15 +251,13 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
     std::weak_ptr<StreamContext> weak_stream = stream;
     stream->stream_id = config.stream_id();
     Statistics::instance().registerStream(stream->stream_id);
-    stream->transport_config = makeTransportStreamConfig(config);
-    stream->runtime_config = config;
+    stream->config = config;
     stream->buffer = createStreamBuffer(stream->stream_id);
     stream->publisher = std::make_unique<RtspPublisher>();
     stream->recorder = std::make_unique<Recorder>();
     stream->snapshotter = std::make_unique<Snapshotter>();
-    if (!stream->transport_config.alarm_snapshot_dir().empty() &&
-        !stream->snapshotter->configure(stream->stream_id,
-                                        stream->transport_config.alarm_snapshot_dir())) {
+    if (!config.alarm_snapshot_dir().empty() &&
+        !stream->snapshotter->configure(stream->stream_id, config.alarm_snapshot_dir())) {
         LOG_WARN("[Pipeline] stream={} snapshotter configure failed", stream->stream_id);
     }
 
@@ -275,25 +272,41 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
     }
     stream->detector_runtime = std::move(detector_runtime);
 
+    auto tracker_runtime = std::make_shared<TrackerRuntimeEntry>();
+    if (config.has_tracker()) {
+        tracker_runtime->config = config.tracker();
+        if (tracker_runtime->config.enabled()) {
+            tracker_runtime->tracker = TrackerFactory::create(tracker_runtime->config);
+            if (!tracker_runtime->tracker) {
+                LOG_WARN("[Pipeline] stream={} tracker type unsupported type={}",
+                         stream->stream_id,
+                         tracker_runtime->config.tracker_type());
+            }
+            if (tracker_runtime->tracker && !tracker_runtime->tracker->init()) {
+                LOG_ERROR("[Pipeline] stream={} tracker init failed", stream->stream_id);
+                tracker_runtime->tracker.reset();
+            }
+        }
+    }
+    stream->tracker_runtime = std::move(tracker_runtime);
+
     stream->puller = std::make_unique<RTSPPuller>(
-        stream->transport_config,
+        config,
         stream->buffer,
         [this](const std::string& stream_id) {
             if (infer_scheduler_) {
                 infer_scheduler_->notifyFrameReady(stream_id);
             }
         },
-        [this, weak_stream](const std::vector<RtspStreamSpec>& specs) {
+        [this, weak_stream, config](const std::vector<RtspStreamSpec>& specs) {
             auto stream = weak_stream.lock();
             if (!stream) {
                 return;
             }
 
             stream->video_nal_length_size.store(videoNalLengthSizeFromSpecs(specs));
-            if (stream->publisher && !stream->transport_config.new_rtsp_url().empty() &&
-                !stream->publisher->configure(stream->stream_id,
-                                              stream->transport_config.new_rtsp_url(),
-                                              specs)) {
+            if (stream->publisher && !config.new_rtsp_url().empty() &&
+                !stream->publisher->configure(stream->stream_id, config.new_rtsp_url(), specs)) {
                 LOG_WARN("[Pipeline] stream={} publisher configure failed", stream->stream_id);
                 requestAsyncStopStream(stream);
                 return;
@@ -303,7 +316,7 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
         });
 
     if (infer_scheduler_) {
-        infer_scheduler_->upsertStream(stream->stream_id, stream->runtime_config, stream->buffer);
+        infer_scheduler_->upsertStream(stream->stream_id, config, stream->buffer);
     }
 
     stream->publish_thread = std::thread(&Pipeline::publishLoop, this, stream);
@@ -321,48 +334,6 @@ std::shared_ptr<StreamContext> Pipeline::buildStreamContext(const StreamConfig& 
 
     LOG_INFO("[Pipeline] stream={} skeleton context created", stream->stream_id);
     return stream;
-}
-
-void Pipeline::updateStreamRuntime(const std::shared_ptr<StreamContext>& stream,
-                                   const StreamConfig& runtime_config) {
-    if (!stream) {
-        return;
-    }
-
-    if (!stream->detector_runtime) {
-        stream->detector_runtime = std::make_shared<DetectorRuntimeEntry>();
-    }
-
-    if (hasDetectorConfigChanged(stream->detector_runtime->config, runtime_config)) {
-        std::unique_ptr<IDetector> next_detector;
-        if (runtime_config.algorithms_size() > 0) {
-            next_detector = DetectorFactory::create(runtime_config);
-            if (next_detector && !next_detector->init()) {
-                LOG_ERROR("[Pipeline] stream={} detector reinit failed", stream->stream_id);
-                next_detector.reset();
-            }
-        }
-
-        std::lock_guard<std::mutex> detector_lock(stream->detector_runtime->mutex);
-        if (stream->detector_runtime->detector) {
-            stream->detector_runtime->detector->release();
-            stream->detector_runtime->detector.reset();
-        }
-        stream->detector_runtime->config = runtime_config;
-        stream->detector_runtime->detector = std::move(next_detector);
-    } else {
-        std::lock_guard<std::mutex> detector_lock(stream->detector_runtime->mutex);
-        stream->detector_runtime->config = runtime_config;
-    }
-
-    if (infer_scheduler_) {
-        infer_scheduler_->upsertStream(stream->stream_id, runtime_config, stream->buffer);
-    }
-
-    LOG_INFO("[Pipeline] stream={} runtime updated algorithms={} tracker_enabled={}",
-             stream->stream_id,
-             runtime_config.algorithms_size(),
-             runtime_config.has_tracker() && runtime_config.tracker().enabled());
 }
 
 void Pipeline::requestAsyncStopStream(const std::shared_ptr<StreamContext>& stream) {
@@ -387,25 +358,23 @@ void Pipeline::requestAsyncStopStream(const std::shared_ptr<StreamContext>& stre
 
 void Pipeline::configureStreamRecorder(const std::shared_ptr<StreamContext>& stream,
                                        const std::vector<RtspStreamSpec>& specs) {
-    if (!stream || !stream->recorder || stream->transport_config.alarm_record_dir().empty()) {
+    if (!stream || !stream->recorder || stream->config.alarm_record_dir().empty()) {
         return;
     }
 
     std::lock_guard<std::mutex> lock(stream->recorder_mutex);
-    if (!stream->recorder->configure(stream->stream_id,
-                                     stream->transport_config.alarm_record_dir(),
-                                     specs)) {
+    if (!stream->recorder->configure(stream->stream_id, stream->config.alarm_record_dir(), specs)) {
         LOG_WARN("[Pipeline] stream={} recorder configure failed", stream->stream_id);
     }
 }
 
 std::string Pipeline::triggerAlarmRecording(const std::shared_ptr<StreamContext>& stream,
                                             int64_t now_ms) {
-    if (!stream || !stream->recorder || stream->transport_config.alarm_record_dir().empty()) {
+    if (!stream || !stream->recorder || stream->config.alarm_record_dir().empty()) {
         return {};
     }
 
-    const int duration_s = stream->transport_config.alarm_record_duration_s();
+    const int duration_s = stream->config.alarm_record_duration_s();
     if (duration_s <= 0) {
         return {};
     }
@@ -425,7 +394,7 @@ std::string Pipeline::triggerAlarmSnapshot(const std::shared_ptr<StreamContext>&
                                            int64_t now_mono_ms,
                                            const FrameBundle& frame,
                                            const std::vector<DetectionObject>& objects) {
-    if (!stream || !stream->snapshotter || stream->transport_config.alarm_snapshot_dir().empty() ||
+    if (!stream || !stream->snapshotter || stream->config.alarm_snapshot_dir().empty() ||
         !frame.decoded_image || objects.empty()) {
         return {};
     }
@@ -516,9 +485,20 @@ void Pipeline::inferLoop(int idx) {
             std::lock_guard<std::mutex> lock(stream->detector_runtime->mutex);
             if (stream->detector_runtime->detector) {
                 FrameInferenceResult inference_result =
-                    stream->detector_runtime->detector->detect(*task.frame,
-                                                               stream->detector_runtime->config);
+                    stream->detector_runtime->detector->detect(*task.frame, stream->detector_runtime->config);
+                if (stream->tracker_runtime && stream->tracker_runtime->tracker) {
+                    TrackFrame track_frame;
+                    track_frame.stream_id = task.frame->stream_id;
+                    track_frame.frame_id = task.frame->frame_id;
+                    track_frame.timestamp_ms = task.frame->timestamp_ms;
+                    track_frame.width = task.frame->width;
+                    track_frame.height = task.frame->height;
 
+                    std::lock_guard<std::mutex> tracker_lock(stream->tracker_runtime->mutex);
+                    (void)stream->tracker_runtime->tracker->track(track_frame,
+                                                                  inference_result.objects,
+                                                                  stream->tracker_runtime->config);
+                }
                 const auto alarm_config = selectAlarmConfig(stream->detector_runtime->config,
                                                             inference_result.algorithm_id);
                 task.buffer->markInferenceDone(inference_result);
@@ -528,26 +508,20 @@ void Pipeline::inferLoop(int idx) {
 
                 std::string record_name;
                 std::string snapshot_name;
-                const int64_t now_mono_ms = steadyNowMs();
-                if (!inference_result.alarm_objects.empty()) {
+                if (!inference_result.objects.empty()) {
+                    const int64_t now_mono_ms = steadyNowMs();
                     record_name = triggerAlarmRecording(stream, now_mono_ms);
                     snapshot_name = triggerAlarmSnapshot(stream,
                                                          now_mono_ms,
                                                          *task.frame,
-                                                         inference_result.alarm_objects);
+                                                         inference_result.objects);
                 }
 
-                if (ipc_ && !inference_result.alarm_objects.empty()) {
-                    std::map<uint32_t, std::vector<DetectionObject>> grouped_alarm_objects;
-                    for (const auto& target : inference_result.alarm_objects) {
-                        grouped_alarm_objects[target.class_id()].push_back(target);
-                    }
-
-                    for (const auto& [class_id, grouped_targets] : grouped_alarm_objects) {
-                        (void)class_id;
+                if (ipc_) {
+                    for (const auto& target : inference_result.objects) {
                         ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
                                                       alarm_config,
-                                                      grouped_targets,
+                                                      target,
                                                       snapshot_name,
                                                       record_name));
                     }
@@ -586,28 +560,22 @@ void Pipeline::publishLoop(const std::shared_ptr<StreamContext>& stream) {
         if (packet->media_type == MediaType::Video && sei_injector_) {
             const auto frame = stream->buffer->findFrame(packet->frame_id);
             const auto codec_type = seiCodecTypeFromFrame(frame);
-            std::string algorithm_id;
-            std::vector<DetectionObject> bbox_items;
-            int64_t expire_at_mono_ms = 0;
             if (const auto cached_result = stream->buffer->takeCachedInferenceResult(packet->frame_id,
                                                                                      packet->pts,
                                                                                      steadyNowMs())) {
-                algorithm_id = cached_result->algorithm_id;
-                bbox_items = cached_result->objects;
-                expire_at_mono_ms = cached_result->expire_at_mono_ms;
+                const auto payload = buildPayloadContext(stream->stream_id,
+                                                         packet->frame_id,
+                                                         packet->pts,
+                                                         cached_result->algorithm_id,
+                                                         cached_result->objects,
+                                                         false,
+                                                         cached_result->expire_at_mono_ms);
+                sei_injector_->inject(*packet,
+                                      codec_type,
+                                      stream->video_nal_length_size.load(),
+                                      payload,
+                                      packet_override);
             }
-            const auto payload = buildSeiMessageContext(stream->stream_id,
-                                                        packet->frame_id,
-                                                        packet->pts,
-                                                        algorithm_id,
-                                                        bbox_items,
-                                                        false,
-                                                        expire_at_mono_ms);
-            sei_injector_->inject(*packet,
-                                  codec_type,
-                                  stream->video_nal_length_size.load(),
-                                  payload,
-                                  packet_override);
             Statistics::instance().incPublishFrame(stream->stream_id);
         }
 
@@ -674,6 +642,14 @@ void Pipeline::stopStream(const std::shared_ptr<StreamContext>& stream) {
             stream->detector_runtime->detector.reset();
         }
     }
+    if (stream->tracker_runtime) {
+        std::lock_guard<std::mutex> lock(stream->tracker_runtime->mutex);
+        if (stream->tracker_runtime->tracker) {
+            stream->tracker_runtime->tracker->release();
+            stream->tracker_runtime->tracker.reset();
+        }
+    }
+
     Statistics::instance().unregisterStream(stream->stream_id);
 }
 

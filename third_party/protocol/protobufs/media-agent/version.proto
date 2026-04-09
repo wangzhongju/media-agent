@@ -22,6 +22,6 @@ option go_package = "server_demo/pb";
 //
 enum ProtoVersion {
     PROTO_VERSION_UNSPECIFIED = 0;
-    PROTO_VERSION_CURRENT     = 10700; // 1.7.0
+    PROTO_VERSION_CURRENT     = 10400; // 1.4.0
 }
 

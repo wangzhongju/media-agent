@@ -46,11 +46,10 @@ message Envelope {
 
 // ── 单个目标 ──────────────────────────────────────────────
 message DetectionObject {
-    uint32        object_id  = 1; // 跟踪 ID（0 表示无跟踪）
-    uint32        class_id   = 2; // 检测类型 ID
-    string        class_name = 3; // 检测类型字符串
-    float         confidence = 4; // 置信度 [0,1]
-    Box           bbox       = 5; // 检测框
+    int32         object_id  = 1; // 跟踪 ID（-1 表示无跟踪）
+    DetectionType type       = 2; // 检测类型
+    float         confidence = 3; // 置信度 [0,1]
+    Box           bbox       = 4; // 检测框
 }
 
 // ── 单帧检测结果 ──────────────────────────────────────────
@@ -61,28 +60,13 @@ message DetectionFrame {
     int32    frame_width    = 4; // 原始帧宽
     int32    frame_height   = 5; // 原始帧高
     repeated DetectionObject objects = 6; // 检测到的目标列表
-    string   algorithm_id   = 7; // 算法类型（如 "入侵", "聚集"）
+    string   algorithm_id   = 7; // 使用的算法标识
     float    inference_ms   = 8; // 推理耗时（毫秒）
 }
 
 // ── 批量检测结果 ──────────────────────────────────────────
 message DetectionBatch {
-    int32    detection_couont      = 1;
-    repeated DetectionFrame frames = 2;
-}
-
-// ── 报警上报 ──────────────────────────────────────────────
-message AlarmInfo {
-    string alarm_id       = 1; // 报警唯一 ID（UUID）
-    string stream_id      = 2; // 触发报警的流 ID
-    int64  timestamp_ms   = 3; // 报警时间戳（毫秒 Unix）
-    string algorithm_id   = 4; // 算法类型（如 "入侵", "聚集"）
-    int32  level          = 5; // 报警等级：1=提示 2=告警 3=重要 4=紧急
-    float  confidence     = 6; // 触发置信度
-    repeated DetectionObject target = 7; // 触发目标
-    string description    = 8; // 描述信息
-    string snapshot_name  = 9; // 截图文件名（可选）
-    string record_name    = 10; // 视频片段文件名（可选）
+    repeated DetectionFrame frames = 1;
 }
 
 // ── 心跳消息 ──────────────────────────────────────────────
@@ -95,7 +79,7 @@ message HeartBeat {
 // ── 配置下发（包含 ROI + 目标类型过滤）────────────────────
 // 算法配置块
 message AlgorithmConfig {
-    string algorithm_id = 1; // 算法类型（如 "入侵", "聚集"）
+    string algorithm_id = 1; // 算法唯一标识，由上级平台维护
     string model_path   = 2; // 模型文件路径
     float  threshold    = 3; // 默认阈值 [0,1]，可以被 per_type_threshold 覆盖
     int32  alarm_level  = 4; // 报警等级：1=提示 2=告警 3=重要 4=紧急
@@ -105,6 +89,9 @@ message AlgorithmConfig {
 
     // ROI（支持多个区域）
     repeated RoiArea rois = 10;
+
+    // 感兴趣目标类型/过滤策略
+    TargetFilter target_filter = 11;
 }
 
 message TrackerConfig {
@@ -129,7 +116,6 @@ message StreamConfig {
     string alarm_snapshot_dir = 6; // 报警截图目录，建议使用绝对路径，为空表示禁用
     string alarm_record_dir   = 7; // 报警录像目录，建议使用绝对路径，为空表示禁用
     int32 alarm_record_duration_s = 8; // 报警录像时长（秒）
-    int32 alarm_dedup_interval_s = 9; // 告警去重时间窗（秒），<=0 使用默认 5 秒
 
     repeated AlgorithmConfig algorithms = 10;
     TrackerConfig tracker = 11;
@@ -138,8 +124,7 @@ message StreamConfig {
 // 配置下发
 message AgentConfig {
     string agent_id = 1; // 目标 agent ID（空=广播）
-    int32 config_id = 2; // 配置 ID，唯一标识，由上级平台维护
-    repeated StreamConfig streams = 3;
+    repeated StreamConfig streams = 2;
 }
 
 // 配置响应
@@ -149,3 +134,16 @@ message ConfigAck {
     string message        = 3;
 }
 
+// ── 报警上报 ──────────────────────────────────────────────
+message AlarmInfo {
+    string alarm_id       = 1; // 报警唯一 ID（UUID）
+    string stream_id      = 2; // 触发报警的流 ID
+    int64  timestamp_ms   = 3; // 报警时间戳（毫秒 Unix）
+    string alarm_type     = 4; // 报警类型（如 "intrusion", "fire"）
+    int32  level          = 5; // 报警等级：1=提示 2=告警 3=重要 4=紧急
+    float  confidence     = 6; // 触发置信度
+    DetectionObject target = 7; // 触发目标
+    string description    = 8; // 描述信息
+    string snapshot_name  = 9; // 截图文件名（可选）
+    string record_name    = 10; // 视频片段文件名（可选）
+}

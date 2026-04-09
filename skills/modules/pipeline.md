@@ -57,7 +57,7 @@
 
 ### 调整配置合并规则
 
-- 修改 `handleSocketConfig()` 和 `mainLoop()`。
+- 修改 `handleSocketConfig()` 和 `configLoop()`。
 - 保持对 `StreamConfig` / `AlgorithmConfig` 的直接使用。
 
 ### 调整 detector 资源管理

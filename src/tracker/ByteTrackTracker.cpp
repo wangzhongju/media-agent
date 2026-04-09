@@ -2,13 +2,28 @@
 
 #include "common/Logger.h"
 
-#include <algorithm>
-#include <cctype>
 #include <utility>
 #include <vector>
 
 namespace media_agent {
 
+namespace {
+
+int toTrackerClassId(DetectionType type) {
+    switch (type) {
+        case DetectionType::DET_PERSON:
+            return 3;
+        case DetectionType::DET_CAR:
+            return 0;
+        case DetectionType::DET_HELMET:
+        case DetectionType::DET_SMOKE:
+        case DetectionType::DET_UNKNOWN:
+        default:
+            return 6;
+    }
+}
+
+} // namespace
 
 ByteTrackTracker::ByteTrackTracker(TrackerConfig cfg)
     : cfg_(std::move(cfg)) {}
@@ -52,12 +67,12 @@ bool ByteTrackTracker::track(const TrackFrame& frame,
     std::vector<ma_tracker_detection_t> detections(objects.size());
     for (size_t index = 0; index < objects.size(); ++index) {
         const auto& object = objects[index];
-        detections[index].x = object.bbox().cx();
-        detections[index].y = object.bbox().cy();
+        detections[index].x = object.bbox().x();
+        detections[index].y = object.bbox().y();
         detections[index].width = object.bbox().width();
         detections[index].height = object.bbox().height();
         detections[index].confidence = object.confidence();
-        detections[index].class_id = object.class_id();
+        detections[index].class_id = toTrackerClassId(object.type());
     }
 
     std::vector<ma_tracker_output_t> outputs(objects.size());

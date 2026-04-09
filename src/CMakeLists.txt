@@ -31,8 +31,11 @@ add_dependencies(media_agent proto_objects)
 # ── 头文件搜索路径 ─────────────────────────────────────────
 target_include_directories(media_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/src       # 使模块间 include 路径统一（如 #include "common/Logger.h"）
+    ${EDGE_INFER_INCLUDE_DIR}     # EdgeInfer 头文件
     ${FFMPEG_INCLUDE_DIRS}        # libavformat / libavutil
     ${MPP_INCLUDE_DIRS}           # rockchip/rk_mpi.h 等
+    # AlgoLib 头文件（有库时启用）
+    # ${ALGO_LIB_INCLUDE_DIR}
 )
 # media-agent.pb.h 路径（CMAKE_BINARY_DIR）和 Protobuf_INCLUDE_DIRS 由 proto_objects PUBLIC 自动传递
 
@@ -56,15 +59,16 @@ target_link_libraries(media_agent PRIVATE
     # nlohmann/json（header-only，通过 INTERFACE 目标传递 include 路径）
     nlohmann_json::nlohmann_json
 
-    # EdgeDeploy
-    edgeDeploy
-
-    # byteTrack
     media_agent_bytetrack
+
+    # 算法库（有库时启用）
+    # AlgoLib::algo
 
     # 系统库
     pthread
 )
+
+target_link_libraries(media_agent PRIVATE ${EDGE_INFER_LIBRARY})
 
 # ── 编译器警告（可选调整） ────────────────────────────────
 target_compile_options(media_agent PRIVATE
@@ -72,5 +76,6 @@ target_compile_options(media_agent PRIVATE
 )
 
 # ── 安装规则 ──────────────────────────────────────────────
-install(TARGETS media_agent RUNTIME DESTINATION .)
-install(FILES   ${CMAKE_SOURCE_DIR}/config/config.json DESTINATION config)
+install(TARGETS media_agent RUNTIME DESTINATION bin)
+install(FILES   ${CMAKE_SOURCE_DIR}/config/config.json DESTINATION etc/media_agent)
+

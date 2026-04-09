@@ -34,7 +34,6 @@ static PipelineConfig parsePipeline(const json& j) {
 static LogConfig parseLog(const json& j) {
     LogConfig c;
     c.level       = jget<std::string>(j, "level", "info");
-    c.output      = jget<std::string>(j, "output", "file");
     c.log_dir     = jget<std::string>(j, "log_dir", "log");
     c.max_file_mb = jget<int>(j, "max_file_mb", 50);
     c.max_files   = jget<int>(j, "max_files", 5);
@@ -66,7 +65,6 @@ AppConfig AppConfig::loadFromString(const std::string& json_str) {
 std::string AppConfig::toJsonString() const {
     json j;
     j["log"]["level"]        = log.level;
-    j["log"]["output"]       = log.output;
     j["log"]["log_dir"]      = log.log_dir;
     j["socket"]["socket_path"]              = socket.socket_path;
     j["socket"]["heartbeat_interval_s"]     = socket.heartbeat_interval_s;

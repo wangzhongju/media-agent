@@ -15,7 +15,6 @@ struct SocketConfig {
 
 struct LogConfig {
     std::string level    = "info";   // trace/debug/info/warn/error
-    std::string output   = "file";   // file/console
     std::string log_dir  = "log";
     int         max_file_mb = 50;
     int         max_files   = 5;

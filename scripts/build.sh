@@ -19,10 +19,14 @@ echo "  BUILD_DIR  : ${BUILD_DIR}"
 echo "  JOBS       : ${JOBS}"
 echo "=================================================="
 
+# ── 可选：指定算法库路径 ──────────────────────────────────
+# export ALGO_LIB_ROOT=/path/to/algo_lib
+
 # ── CMake 配置 ────────────────────────────────────────────
 cmake -B "${BUILD_DIR}" -S "${PROJECT_ROOT}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -G Ninja
 
 # ── 编译 ──────────────────────────────────────────────────
 cmake --build "${BUILD_DIR}" --parallel "${JOBS}"

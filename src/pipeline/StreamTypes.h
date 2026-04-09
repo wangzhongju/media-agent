@@ -67,7 +67,6 @@ struct FrameInferenceResult {
     int64_t                     pts = -1;
     std::string                 algorithm_id;
     std::vector<DetectionObject> objects;
-    std::vector<DetectionObject> alarm_objects;
     int64_t                     infer_start_mono_ms = 0;
     int64_t                     infer_done_mono_ms = 0;
     int64_t                     expire_at_mono_ms = 0;

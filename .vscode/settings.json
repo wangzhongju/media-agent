@@ -3,6 +3,5 @@
   "chat.tools.terminal.autoApprove": {
     "dpkg": true,
     "cmake": true
-  },
-  "C_Cpp.intelliSenseCachePath": "/mnt/data"
+  }
 }

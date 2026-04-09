@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <filesystem>
 #include <thread>
 #include <unistd.h>
 
@@ -38,7 +39,10 @@ int main(int argc, char* argv[]) {
     }
 
     // 日志初始化
-    media_agent::Logger::init(cfg.log);
+    std::filesystem::create_directories(cfg.log.log_dir);
+    media_agent::Logger::init(cfg.log.log_dir,
+                              spdlog::level::from_str(cfg.log.level),
+                              cfg.log.max_file_mb, cfg.log.max_files);
 
     LOG_INFO("/*******************************************************/");
     LOG_INFO("/*                                                     */");

@@ -1,11 +1,9 @@
 #include "stream/SeiInjector.h"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <string>
 #include <vector>
 
 extern "C" {
@@ -16,16 +14,10 @@ namespace media_agent {
 
 namespace {
 
-
 constexpr std::array<uint8_t, 4> kAnnexBStartCode{{0x00, 0x00, 0x00, 0x01}};
-constexpr int kVersion = 1;
-enum MspItemType : uint8_t {
-    kMspItemTypeBbox = 1,
-    kMspItemTypeTextOsd = 2,
-};
 constexpr std::array<uint8_t, 16> kSeiUuid{{
-    0x4D, 0x45, 0x54, 0x41, 0x44, 0x41, 0x54, 0x41,
-    0x53, 0x45, 0x49, 0x42, 0x59, 0x43, 0x48, 0x42,
+    0x83, 0xA1, 0x61, 0xC4, 0x31, 0xA7, 0x4B, 0xD8,
+    0xA6, 0x93, 0x52, 0x11, 0x3A, 0x41, 0x10, 0x7E,
 }};
 
 std::shared_ptr<AVPacket> allocatePacket(size_t size) {
@@ -82,69 +74,11 @@ uint8_t quantizeUnitToU8(float value) {
     return static_cast<uint8_t>(scaled);
 }
 
-uint16_t quantizeAngleToU16(float angle_degrees) {
-    float normalized = std::fmod(angle_degrees, 360.0F);
-    if (normalized < 0.0F) {
-        normalized += 360.0F;
+uint8_t encodeObjectId(int32_t object_id) {
+    if (object_id < 0 || object_id > static_cast<int32_t>(std::numeric_limits<uint8_t>::max() - 1)) {
+        return std::numeric_limits<uint8_t>::max();
     }
-    const float scaled = std::round((normalized / 360.0F) * 65535.0F);
-    return static_cast<uint16_t>(scaled);
-}
-
-std::string detectionTypeToUtf8(const DetectionObject& object) {
-    return object.class_name().empty() ? std::string("unknown") : object.class_name();
-}
-
-std::string osdTextToUtf8(const SeiTextOsdItem& item) {
-    return item.text;
-}
-
-size_t appendMspBboxItem(std::vector<uint8_t>& payload, const DetectionObject& object) {
-    constexpr size_t kFixedBboxPayloadSize = 18;
-    const auto full_type_name = detectionTypeToUtf8(object);
-    const size_t max_type_length = std::numeric_limits<uint8_t>::max() - kFixedBboxPayloadSize;
-    const size_t type_length = std::min(full_type_name.size(), max_type_length);
-
-    payload.push_back(kMspItemTypeBbox);
-    payload.push_back(static_cast<uint8_t>(kFixedBboxPayloadSize + type_length));
-
-    const uint32_t object_id = object.object_id();
-    appendBeU16(payload, static_cast<uint16_t>(std::min<uint32_t>(object_id, std::numeric_limits<uint16_t>::max())));
-    payload.push_back(static_cast<uint8_t>(type_length));
-    payload.push_back(quantizeUnitToU8(object.confidence()));
-
-    const auto& box = object.bbox();
-    appendBeU16(payload, quantizeUnitToU16(box.cx()));
-    appendBeU16(payload, quantizeUnitToU16(box.cy()));
-    appendBeU16(payload, quantizeUnitToU16(box.width()));
-    appendBeU16(payload, quantizeUnitToU16(box.height()));
-    appendBeU16(payload, quantizeAngleToU16(box.angle()));
-    appendBeU32(payload, 0);
-
-    payload.insert(payload.end(), full_type_name.begin(), full_type_name.begin() + static_cast<std::ptrdiff_t>(type_length));
-    return 1;
-}
-
-size_t appendMspTextOsdItem(std::vector<uint8_t>& payload, const SeiTextOsdItem& item) {
-    constexpr size_t kFixedTextOsdPayloadSize = 20;
-    const auto full_text = osdTextToUtf8(item);
-    const size_t max_text_length = std::numeric_limits<uint8_t>::max() - kFixedTextOsdPayloadSize;
-    const size_t text_length = std::min(full_text.size(), max_text_length);
-
-    payload.push_back(kMspItemTypeTextOsd);
-    payload.push_back(static_cast<uint8_t>(kFixedTextOsdPayloadSize + text_length));
-    payload.push_back(item.flags);
-    payload.push_back(item.style);
-    appendBeU16(payload, quantizeUnitToU16(item.x));
-    appendBeU16(payload, quantizeUnitToU16(item.y));
-    appendBeU16(payload, quantizeUnitToU16(item.width));
-    appendBeU16(payload, quantizeUnitToU16(item.height));
-    payload.push_back(static_cast<uint8_t>(text_length));
-    payload.push_back(item.reserved);
-    appendBeU32(payload, item.text_color);
-    appendBeU32(payload, item.bg_color);
-    payload.insert(payload.end(), full_text.begin(), full_text.begin() + static_cast<std::ptrdiff_t>(text_length));
-    return 1;
+    return static_cast<uint8_t>(object_id);
 }
 
 void appendSeiLength(std::vector<uint8_t>& rbsp, size_t value) {
@@ -174,28 +108,27 @@ std::vector<uint8_t> toEbsp(const std::vector<uint8_t>& rbsp) {
     return ebsp;
 }
 
-std::vector<uint8_t> buildMspV1UserDataPayload(const SeiMessageContext& context) {
+std::vector<uint8_t> buildUserDataPayload(const SeiPayloadContext& context) {
     std::vector<uint8_t> payload;
-    const size_t max_item_count = static_cast<size_t>(std::numeric_limits<uint8_t>::max());
-    const size_t bbox_count = std::min(context.bbox_items.size(), max_item_count);
-    const size_t text_osd_count = std::min(context.text_osd_items.size(), max_item_count);
-    payload.reserve(kSeiUuid.size() + 4 + bbox_count * 32 + text_osd_count * 48);
+    const uint8_t version = 2;
+    const size_t object_count = std::min(context.objects.size(), static_cast<size_t>(std::numeric_limits<uint8_t>::max()));
+    const uint32_t timestamp = context.pts <= 0 ? 0U : static_cast<uint32_t>(context.pts);
+    payload.reserve(kSeiUuid.size() + 6 + object_count * 12);
     payload.insert(payload.end(), kSeiUuid.begin(), kSeiUuid.end());
-    payload.push_back(kVersion);
-    payload.push_back(0); // reserved1
-    payload.push_back(0); // reserved2
-    const size_t item_count_index = payload.size();
-    payload.push_back(0);
+    payload.push_back(version);
+    payload.push_back(static_cast<uint8_t>(object_count));
+    appendBeU32(payload, timestamp);
 
-    uint8_t item_count = 0;
-    for (size_t i = 0; i < bbox_count && item_count < std::numeric_limits<uint8_t>::max(); ++i) {
-        item_count += static_cast<uint8_t>(appendMspBboxItem(payload, context.bbox_items[i]));
+    for (size_t i = 0; i < object_count; ++i) {
+        const auto& object = context.objects[i];
+        payload.push_back(encodeObjectId(object.object_id()));
+        appendBeU16(payload, static_cast<uint16_t>(object.type()));
+        payload.push_back(quantizeUnitToU8(object.confidence()));
+        appendBeU16(payload, quantizeUnitToU16(object.bbox().x()));
+        appendBeU16(payload, quantizeUnitToU16(object.bbox().y()));
+        appendBeU16(payload, quantizeUnitToU16(object.bbox().width()));
+        appendBeU16(payload, quantizeUnitToU16(object.bbox().height()));
     }
-    for (size_t i = 0; i < text_osd_count && item_count < std::numeric_limits<uint8_t>::max(); ++i) {
-        item_count += static_cast<uint8_t>(appendMspTextOsdItem(payload, context.text_osd_items[i]));
-    }
-
-    payload[item_count_index] = item_count;
 
     return payload;
 }
@@ -260,26 +193,22 @@ std::vector<uint8_t> toLengthPrefixedNal(const std::vector<uint8_t>& nal_unit, i
 
 } // namespace
 
-class MspSeiInjector final : public ISeiInjector {
+class PassthroughSeiInjector final : public ISeiInjector {
 public:
     bool inject(const EncodedPacket& source_packet,
                 SeiCodecType codec_type,
                 int nal_length_size,
-                const SeiMessageContext& context,
+                const SeiPayloadContext& context,
                 std::shared_ptr<AVPacket>& output_packet) const override {
         if (!source_packet.packet || !source_packet.packet->data || source_packet.packet->size <= 0) {
             output_packet = source_packet.packet;
             return false;
         }
-        if (!context.hasItems()) {
+        if (context.objects.empty()) {
             output_packet = source_packet.packet;
             return true;
         }
-        const auto payload = buildMspV1UserDataPayload(context);
-        if (payload.empty()) {
-            output_packet = source_packet.packet;
-            return false;
-        }
+        const auto payload = buildUserDataPayload(context);
         const auto sei_nal_unit = codec_type == SeiCodecType::H265
             ? buildH265SeiNal(payload)
             : buildH264SeiNal(payload);
@@ -312,8 +241,8 @@ public:
     }
 };
 
-std::unique_ptr<ISeiInjector> createMspSeiInjector() {
-    return std::make_unique<MspSeiInjector>();
+std::unique_ptr<ISeiInjector> createPassthroughSeiInjector() {
+    return std::make_unique<PassthroughSeiInjector>();
 }
 
 } // namespace media_agent
