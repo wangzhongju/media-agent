@@ -2,30 +2,30 @@ version: "3.9"
 
 services:
   media_agent:
-    build:
-      context: ..           # 项目根目录
-      dockerfile: docker/Dockerfile
-    image: media_agent:latest
+    image: registry.cn-hangzhou.aliyuncs.com/haibo_chen/media_agent:latest
     container_name: media_agent
+    user: "0:0"
+    privileged: true
 
     restart: unless-stopped
 
     # ── 设备直通（RK3588）────────────────────────────────
-    devices:
-      - /dev/dri:/dev/dri           # GPU/VPU（rkmpp 硬件解码）
-      - /dev/dma_heap:/dev/dma_heap # DMA 堆（rkmpp 需要）
-      - /dev/rknpu:/dev/rknpu     # NPU（如算法库直接访问 NPU）
+    # devices:
+    #   - /dev/mpp_service:/dev/mpp_service
+    #   - /dev/dma_heap:/dev/dma_heap
+    #   - /dev/rga:/dev/rga
+    #   - /dev/dri/renderD128:/dev/dri/renderD128
+    #   - /dev/dri/renderD129:/dev/dri/renderD129
+
 
     # ── 卷挂载 ────────────────────────────────────────────
     volumes:
       # Unix Socket 目录（与上级平台共享 /tmp）
       - /tmp:/tmp
       # 配置文件（覆盖容器内默认配置）
-      - ./config/config.json:/app/config/config.json:ro
-      # 日志持久化
-      - media_agent_logs:/var/log/media_agent
+      # - ../config/config.json:/opt/media_agent/config/config.json:ro
       # 算法模型（按需挂载）
-      - /opt/models:/opt/models:ro
+      # - ../third_party/edgeDeploy/example/weights:/opt/media_agent/models/weights:ro
 
     # ── 网络：仅本地，不暴露端口 ──────────────────────────
     network_mode: host
@@ -54,6 +54,4 @@ services:
     #   timeout: 5s
     #   retries: 3
 
-volumes:
-  media_agent_logs:
 

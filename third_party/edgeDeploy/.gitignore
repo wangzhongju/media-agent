@@ -1,0 +1,89 @@
+# --------------- CMake 构建目录 ---------------
+# 构建目录（默认 build 或 build-*）
+build/
+build-*/
+out/
+build_dir/
+install/
+
+# CMake 生成的临时文件
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+# Makefile
+# *.cmake
+*.ninja
+*.ninja.log
+.ninja_deps
+.ninja_log
+
+# --------------- 编译生成文件 ---------------
+# 可执行文件
+*.exe
+*.out
+*.app
+*.elf
+*.bin
+
+# 动态库/静态库
+# *.so
+# *.so.*
+*.dll
+*.dylib
+# *.a
+*.lib
+
+# 目标文件和中间文件
+*.o
+*.obj
+*.lo
+*.s
+*.ii
+*.i
+
+# 预编译头文件
+*.gch
+*.pch
+
+# --------------- IDE/编辑器配置 ---------------
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.sdf
+*.opensdf
+
+# CLion
+.idea/
+*.iml
+*.ipr
+*.iws
+cmake-build-*/
+
+# VS Code
+.vscode/
+*.code-workspace
+.DS_Store  # macOS 系统文件
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+
+# --------------- 其他临时文件 ---------------
+# 日志文件
+*.log
+
+# 缓存文件
+*.cache
+*.bak
+*~
+\#*#
+.\#*
+

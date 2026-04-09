@@ -45,10 +45,6 @@ public:
         if (stopped_ || !frame) {
             return false;
         }
-        if (released_frame_ids_.find(frame->frame_id) != released_frame_ids_.end()) {
-            released_frame_ids_.erase(frame->frame_id);
-            return false;
-        }
         frames_[frame->frame_id] = frame;
         frame_order_.push_back(frame->frame_id);
         cv_.notify_all();
@@ -177,7 +173,6 @@ public:
 
     void releaseFrame(int64_t frame_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        released_frame_ids_.insert(frame_id);
         frames_.erase(frame_id);
         frame_order_.erase(std::remove(frame_order_.begin(), frame_order_.end(), frame_id), frame_order_.end());
         cached_inference_results_.erase(frame_id);
@@ -378,7 +373,6 @@ private:
     std::deque<std::shared_ptr<EncodedPacket>> packets_;
     std::unordered_map<int64_t, std::shared_ptr<FrameBundle>> frames_;
     std::deque<int64_t> frame_order_;
-    std::unordered_set<int64_t> released_frame_ids_;
     std::unordered_map<int64_t, FrameInferenceResult> cached_inference_results_;
     size_t video_packet_count_ = 0;
     bool stopped_ = false;

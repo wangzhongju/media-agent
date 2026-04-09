@@ -19,12 +19,12 @@ public:
 
     /**
      * 对单帧图像执行推理
-        * @param frame 解码后的 NV12 DMA 图像
-        * @param cfg 算法检测参数
-        * @return 当前帧的推理结果
+     * @param frame 解码后的 NV12 DMA 图像
+     * @param cfg 算法检测参数
+     * @return 当前帧的推理结果
      */
-        virtual FrameInferenceResult detect(const FrameBundle& frame,
-                                    const StreamConfig& cfg) = 0;
+    virtual FrameInferenceResult detect(const FrameBundle& frame,
+                                        const StreamConfig& cfg) = 0;
 
     /**
      * 释放资源

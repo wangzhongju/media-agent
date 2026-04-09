@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        echo "[media-agent] postinst: configure"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload || true
+            systemctl enable media-agent.service || true
+            systemctl restart media-agent.service || systemctl start media-agent.service || true
+        fi
+        ;;
+    *)
+        ;;
+esac
+
+exit 0

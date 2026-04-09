@@ -1,0 +1,7 @@
+media-agent (1.0.0-7) unstable; urgency=medium
+
+  * Include runtime shared libraries, model weights and mpp libs in package.
+  * Add systemd service and maintainer scripts for install/remove hooks.
+  * Move install path from /usr/local to /opt/media_agent for dh_usrlocal compliance.
+
+ -- haibo.chen <nmgchenhaibo@foxmail.com>  Wed, 08 Apr 2026 14:20:00 +0000

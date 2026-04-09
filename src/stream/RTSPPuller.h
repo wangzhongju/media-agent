@@ -46,8 +46,7 @@ public:
     RTSPPuller(StreamConfig cfg,
                std::shared_ptr<IStreamBuffer> stream_buffer,
                FrameReadyCallback frame_ready_cb = {},
-               StreamReadyCallback stream_ready_cb = {},
-               PacketCallback packet_cb = {});
+               StreamReadyCallback stream_ready_cb = {});
     ~RTSPPuller();
 
     RTSPPuller(const RTSPPuller&) = delete;
@@ -91,7 +90,6 @@ private:
     std::shared_ptr<IStreamBuffer>  stream_buffer_;
     FrameReadyCallback              frame_ready_cb_;
     StreamReadyCallback             stream_ready_cb_;
-    PacketCallback                  packet_cb_;
 
     // ── FFmpeg avformat（仅 demux，不做 decode） ──────────
     AVFormatContext* fmt_ctx_          = nullptr;

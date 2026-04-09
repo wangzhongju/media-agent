@@ -85,19 +85,13 @@ bool RtspPublisher::openLocked() {
     return true;
 }
 
-bool RtspPublisher::writePacket(const EncodedPacket& packet,
-                                const std::shared_ptr<AVPacket>& packet_override) {
+bool RtspPublisher::writePacket(const AVPacket& packet) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!configured_ || !format_context_) {
         return false;
     }
 
-    const auto& source = packet_override ? packet_override : packet.packet;
-    if (!source) {
-        return false;
-    }
-
-    if (writePacketLocked(packet, source)) {
+    if (writePacketLocked(packet)) {
         return true;
     }
 
@@ -108,11 +102,10 @@ bool RtspPublisher::writePacket(const EncodedPacket& packet,
         return false;
     }
 
-    return writePacketLocked(packet, source);
+    return writePacketLocked(packet);
 }
 
-bool RtspPublisher::writePacketLocked(const EncodedPacket& packet,
-                                      const std::shared_ptr<AVPacket>& source_packet) {
+bool RtspPublisher::writePacketLocked(const AVPacket& packet) {
     auto stream_it = streams_.find(packet.stream_index);
     if (stream_it == streams_.end() || !stream_it->second.stream) {
         return false;
@@ -124,7 +117,7 @@ bool RtspPublisher::writePacketLocked(const EncodedPacket& packet,
     mux_packet.data = nullptr;
     mux_packet.size = 0;
 
-    int ret = av_packet_ref(&mux_packet, source_packet.get());
+    int ret = av_packet_ref(&mux_packet, &packet);
     if (ret < 0) {
         LOG_WARN("[RtspPublisher] stream={} packet ref failed err={}",
                  stream_id_, ffmpegErrorString(ret));
@@ -132,10 +125,7 @@ bool RtspPublisher::writePacketLocked(const EncodedPacket& packet,
     }
 
     mux_packet.stream_index = stream_state.stream->index;
-    mux_packet.pts = packet.pts;
-    mux_packet.dts = packet.dts;
-    mux_packet.duration = packet.duration;
-    mux_packet.flags = packet.is_keyframe ? (mux_packet.flags | AV_PKT_FLAG_KEY) : mux_packet.flags;
+    mux_packet.pos = -1;
     av_packet_rescale_ts(&mux_packet,
                          stream_state.spec.time_base,
                          stream_state.stream->time_base);

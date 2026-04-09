@@ -1,0 +1,15 @@
+[Unit]
+Description=Media Agent Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/media_agent
+Environment=LD_LIBRARY_PATH=/opt/media_agent/lib
+ExecStart=/opt/media_agent/media_agent /opt/media_agent/config/config.json
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

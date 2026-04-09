@@ -1,0 +1,26 @@
+Source: media-agent
+Section: utils
+Priority: optional
+Maintainer: haibo.chen <nmgchenhaibo@foxmail.com>
+Build-Depends:
+ debhelper (>= 12),
+ cmake,
+ g++,
+ pkg-config,
+ libprotobuf-dev,
+ protobuf-compiler,
+ libavformat-dev,
+ libavcodec-dev,
+ libavutil-dev,
+ libswscale-dev,
+ libeigen3-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://example.com/media-agent
+
+Package: media-agent
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libavcodec58, libavformat58, libavutil56, libswscale5
+Description: Media processing agent based on CMake
+ Media processing agent for RTSP pulling, decoding, inference pipeline,
+ tracking, recording and IPC integration.

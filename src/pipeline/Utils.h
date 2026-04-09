@@ -4,16 +4,21 @@
 #include "stream/Utils.h"
 #include "stream/SeiInjector.h"
 
+#include <google/protobuf/util/message_differencer.h>
+
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace media_agent {
 
+template <typename MessageT>
+bool isSameProtoMessage(const MessageT& lhs, const MessageT& rhs) {
+    return google::protobuf::util::MessageDifferencer::Equals(lhs, rhs);
+}
+
 AlgorithmConfig selectAlarmConfig(const StreamConfig& stream_config,
                                   const std::string& algorithm_id);
-
-bool isSameStreamConfig(const StreamConfig& lhs, const StreamConfig& rhs);
 
 SeiCodecType seiCodecTypeFromFrame(const std::shared_ptr<FrameBundle>& frame);
 
@@ -22,12 +27,12 @@ int parseNalLengthSizeFromExtradata(SeiCodecType codec_type,
 
 int videoNalLengthSizeFromSpecs(const std::vector<RtspStreamSpec>& specs);
 
-SeiPayloadContext buildPayloadContext(const std::string& stream_id,
-                                      int64_t frame_id,
-                                      int64_t pts,
-                                      const std::string& algorithm_id,
-                                      const std::vector<DetectionObject>& objects,
-                                      bool reused_cached_result,
-                                      int64_t expire_at_mono_ms);
+SeiMessageContext buildSeiMessageContext(const std::string& stream_id,
+                                         int64_t frame_id,
+                                         int64_t pts,
+                                         const std::string& algorithm_id,
+                                         const std::vector<DetectionObject>& bbox_items,
+                                         bool reused_cached_result,
+                                         int64_t expire_at_mono_ms);
 
 } // namespace media_agent

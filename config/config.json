@@ -1,9 +1,7 @@
 {
   "log": {
     "level": "info",
-    "log_dir": "./log/",
-    "max_file_mb": 50,
-    "max_files": 5
+    "output": "console"
   },
 
   "socket": {

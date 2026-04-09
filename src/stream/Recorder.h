@@ -19,6 +19,13 @@ public:
     Recorder() = default;
     ~Recorder() { close(); }
 
+    void setRecordFormat(const std::string& fmt) {
+        if (fmt == "flv" || fmt == "mp4") {
+            record_format_ = fmt;
+        }
+    }
+    const std::string& recordFormat() const { return record_format_; }
+
     Recorder(const Recorder&) = delete;
     Recorder& operator=(const Recorder&) = delete;
 
@@ -28,7 +35,6 @@ public:
     bool requestRecording(int duration_s, int64_t now_ms);
     bool start();
     bool appendPacket(const AVPacket& packet);
-    bool appendPacket(const std::shared_ptr<AVPacket>& packet);
     void closeExpired(int64_t now_ms);
     void close();
 
@@ -63,6 +69,8 @@ private:
     AVFormatContext* fmt_ctx_ = nullptr;
     std::unordered_map<int, OutputStreamState> stream_states_;
     std::vector<CachedPacket> gop_cache_;
+
+    std::string record_format_ = "flv"; // "mp4" or "flv"
 };
 
 } // namespace media_agent

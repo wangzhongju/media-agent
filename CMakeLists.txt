@@ -16,7 +16,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # ── 运行 DMA 环境权限检测───────────────────────────────────
-include(${CMAKE_SOURCE_DIR}/cmake/CheckDmaEnv.cmake)
+# include(${CMAKE_SOURCE_DIR}/cmake/CheckDmaEnv.cmake)
 
 # ── 构建时将 config 目录复制到 bin/ ──────────────────────
 file(COPY ${CMAKE_SOURCE_DIR}/config DESTINATION ${CMAKE_BINARY_DIR}/bin)
@@ -24,7 +24,43 @@ file(COPY ${CMAKE_SOURCE_DIR}/config DESTINATION ${CMAKE_BINARY_DIR}/bin)
 # ── 自定义 cmake 模块路径 ─────────────────────────────────
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
-# ── 第三方：FFmpeg（仅用于 RTSP demux，解码由 MPP 承担）──
+set(TARGET_SOC "$ENV{TARGET_SOC}" CACHE STRING "Target SoC for edgeDeploy/rknn runtime")
+if(NOT TARGET_SOC)
+    set(TARGET_SOC "rk3588" CACHE STRING "Target SoC for edgeDeploy/rknn runtime" FORCE)
+endif()
+message(STATUS "TARGET_SOC: ${TARGET_SOC}")
+
+# —— edgeDeploy ——
+set(EDGE_DEPLOY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/edgeDeploy)
+if(NOT EXISTS ${EDGE_DEPLOY_SOURCE_DIR}/CMakeLists.txt)
+    message(FATAL_ERROR "EdgeDeploy submodule NOT found: ${EDGE_DEPLOY_SOURCE_DIR}")
+endif()
+
+add_subdirectory(${EDGE_DEPLOY_SOURCE_DIR} third_party/edgeDeploy)
+
+target_include_directories(edgeDeploy PUBLIC
+    ${EDGE_DEPLOY_SOURCE_DIR}/edgeDeploy/include
+)
+
+message(STATUS "EdgeDeploy added as subdirectory: ${EDGE_DEPLOY_SOURCE_DIR}")
+
+# ── 跟踪 ────────────────────────────────────────────────
+set(ALGORITHM_ROOT ${CMAKE_SOURCE_DIR}/third_party/algorithm)
+set(BYTETRACK_SUBMODULE_DIR ${ALGORITHM_ROOT}/byteTrack)
+
+if(NOT EXISTS ${BYTETRACK_SUBMODULE_DIR}/CMakeLists.txt)
+    message(FATAL_ERROR "ByteTrack submodule NOT found: ${BYTETRACK_SUBMODULE_DIR}")
+endif()
+
+add_subdirectory(${BYTETRACK_SUBMODULE_DIR} third_party/algorithm/byteTrack)
+
+target_include_directories(media_agent_bytetrack PUBLIC
+    ${BYTETRACK_SUBMODULE_DIR}/include
+)
+
+message(STATUS "ByteTrack added as submodule: ${BYTETRACK_SUBMODULE_DIR}")
+
+# ── 第三方：FFmpeg ──
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED
     libavformat
@@ -36,33 +72,8 @@ pkg_check_modules(FFMPEG REQUIRED
 # ── 第三方：Rockchip MPP（硬件视频解码）────────────────────
 find_package(MPP REQUIRED)
 
-set(EDGE_INFER_ROOT ${CMAKE_SOURCE_DIR}/third_party/edgeInfer)
-set(EDGE_INFER_INCLUDE_DIR ${EDGE_INFER_ROOT}/include)
-find_library(EDGE_INFER_LIBRARY
-    NAMES edgeDeploy
-    PATHS ${EDGE_INFER_ROOT}/lib
-)
-if(NOT EDGE_INFER_LIBRARY)
-    find_library(EDGE_INFER_LIBRARY NAMES edgeDeploy)
-endif()
-
-if(NOT EDGE_INFER_LIBRARY)
-    message(FATAL_ERROR "EdgeDeploy library NOT found: libedgeDeploy.so is required")
-endif()
-message(STATUS "EdgeDeploy found: ${EDGE_INFER_LIBRARY}")
-
 # ── 第三方：Protobuf（结构化消息序列化）────────────────────
 find_package(Protobuf REQUIRED)
-
-# ── 第三方：算法库（可选，接口待定）──────────────────────
-# 当 third_party/algo_lib 或 ALGO_LIB_ROOT 存在时自动启用
-find_package(AlgoLib QUIET)
-if(AlgoLib_FOUND)
-    message(STATUS "AlgoLib found: ${ALGO_LIB_LIBRARY}")
-    add_compile_definitions(HAVE_ALGO_LIB)
-else()
-    message(STATUS "AlgoLib NOT found, detector runs in stub mode")
-endif()
 
 # ── 第三方：nlohmann/json（header-only，源码在 third_party）─
 add_library(nlohmann_json INTERFACE)
@@ -98,3 +109,29 @@ target_include_directories(proto_objects PUBLIC
 # ── 子模块 ────────────────────────────────────────────────
 add_subdirectory(src)
 
+set_target_properties(media_agent edgeDeploy media_agent_bytetrack es_bytetrack PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/lib"
+)
+
+install(TARGETS edgeDeploy media_agent_bytetrack es_bytetrack
+    LIBRARY DESTINATION lib
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/mpp/lib/
+    DESTINATION lib
+    FILES_MATCHING PATTERN "*.so*"
+)
+
+# 顶层安装阶段剔除 edgeDeploy 的开发/示例产物，统一作用于本地安装、deb 和 docker 镜像安装。
+install(CODE [[
+    set(_install_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+    file(REMOVE
+        "${_install_root}/edgeDeploy_hardhat_demo"
+        "${_install_root}/edgeDeploy_hardhat_video_demo"
+    )
+    file(REMOVE_RECURSE
+        "${_install_root}/include"
+        "${_install_root}/images"
+        "${_install_root}/video"
+    )
+]])

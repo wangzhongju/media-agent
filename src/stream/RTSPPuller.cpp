@@ -85,13 +85,11 @@ int RTSPPuller::ffmpegInterruptCallback(void* opaque) {
 RTSPPuller::RTSPPuller(StreamConfig cfg,
                        std::shared_ptr<IStreamBuffer> stream_buffer,
                        FrameReadyCallback frame_ready_cb,
-                 StreamReadyCallback stream_ready_cb,
-                 PacketCallback packet_cb)
+                       StreamReadyCallback stream_ready_cb)
     : cfg_(std::move(cfg)),
       stream_buffer_(std::move(stream_buffer)),
       frame_ready_cb_(std::move(frame_ready_cb)),
-    stream_ready_cb_(std::move(stream_ready_cb)),
-    packet_cb_(std::move(packet_cb)) {}
+      stream_ready_cb_(std::move(stream_ready_cb)) {}
 
 RTSPPuller::~RTSPPuller() { stop(); }
 
@@ -169,10 +167,6 @@ void RTSPPuller::pullLoop() {
             encoded_packet->timestamp_ms = toMillis(pkt->pts, input_stream->time_base);
             encoded_packet->is_keyframe = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
             encoded_packet->enqueue_mono_ms = steadyNowMs();
-
-            if (packet_cb_) {
-                packet_cb_(encoded_packet->packet);
-            }
 
             if (pkt->stream_index == video_stream_idx_) {
                 encoded_packet->media_type = MediaType::Video;

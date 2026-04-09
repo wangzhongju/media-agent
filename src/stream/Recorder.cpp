@@ -123,13 +123,6 @@ bool Recorder::start() {
     return true;
 }
 
-bool Recorder::appendPacket(const std::shared_ptr<AVPacket>& packet) {
-    if (!packet) {
-        return false;
-    }
-    return appendPacket(*packet);
-}
-
 bool Recorder::appendPacket(const AVPacket& packet) {
     if (!packet.data || packet.size <= 0) {
         return false;
@@ -294,17 +287,19 @@ void Recorder::close() {
 }
 
 bool Recorder::openRecording() {
-    record_file_name_ = buildRecordingFileName(stream_id_, "mp4");
+    std::string ext = record_format_;
+    std::string fmt_name = record_format_;
+    record_file_name_ = buildRecordingFileName(stream_id_, ext);
     record_tmp_file_name_ = makeHiddenRecordingName(record_file_name_);
 
     const std::filesystem::path output_path = std::filesystem::path(base_dir_) / record_tmp_file_name_;
     std::filesystem::create_directories(output_path.parent_path());
 
     AVFormatContext* fmt_ctx = nullptr;
-    int ret = avformat_alloc_output_context2(&fmt_ctx, nullptr, "mp4", output_path.c_str());
+    int ret = avformat_alloc_output_context2(&fmt_ctx, nullptr, fmt_name.c_str(), output_path.c_str());
     if (ret < 0 || !fmt_ctx) {
-        LOG_ERROR("[Recorder] stream={} alloc mp4 context failed path={} err={}",
-                  stream_id_, output_path.string(), ffmpegErrorString(ret));
+        LOG_ERROR("[Recorder] stream={} alloc {} context failed path={} err={}",
+                  stream_id_, fmt_name, output_path.string(), ffmpegErrorString(ret));
         record_file_name_.clear();
         record_tmp_file_name_.clear();
         return false;

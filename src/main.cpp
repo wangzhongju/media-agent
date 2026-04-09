@@ -8,7 +8,6 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
-#include <filesystem>
 #include <thread>
 #include <unistd.h>
 
@@ -39,13 +38,14 @@ int main(int argc, char* argv[]) {
     }
 
     // 日志初始化
-    std::filesystem::create_directories(cfg.log.log_dir);
-    media_agent::Logger::init(cfg.log.log_dir,
-                              spdlog::level::from_str(cfg.log.level),
-                              cfg.log.max_file_mb, cfg.log.max_files);
+    media_agent::Logger::init(cfg.log);
 
-    LOG_INFO("media_agent starting. version={}, pid={}", VERSION_STRING, getpid());
-    LOG_INFO("config={} agent_id={} socket_path={}",
+    LOG_INFO("/*******************************************************/");
+    LOG_INFO("/*                                                     */");
+    LOG_INFO("/*         --- media_agent starting ---                */");
+    LOG_INFO("/*                                                     */");
+    LOG_INFO("/*******************************************************/");
+    LOG_INFO("version={}, pid={}, config={} agent_id={} socket_path={}", VERSION_STRING, getpid(),
              config_path, cfg.socket.agent_id, cfg.socket.socket_path);
 
     // 注册信号
@@ -68,8 +68,12 @@ int main(int argc, char* argv[]) {
 
     // 优雅退出
     pipeline.stop();
+    LOG_INFO("/*******************************************************/");
+    LOG_INFO("/*                                                     */");
+    LOG_INFO("/*         --- media_agent exited cleanly ---          */");
+    LOG_INFO("/*                                                     */");
+    LOG_INFO("/*******************************************************/");
     media_agent::Logger::flush();
-    LOG_INFO("media_agent exited cleanly");
     return EXIT_SUCCESS;
 }
 

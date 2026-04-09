@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -31,7 +32,8 @@ struct DetectorRuntimeEntry {
 
 struct StreamContext {
     std::string                     stream_id;
-    StreamConfig                    config;
+    StreamConfig                    transport_config;
+    StreamConfig                    runtime_config;
     std::shared_ptr<IStreamBuffer>  buffer;
     std::shared_ptr<DetectorRuntimeEntry> detector_runtime;
     std::atomic<int>                video_nal_length_size{0};
@@ -40,7 +42,7 @@ struct StreamContext {
     std::mutex                      snapshot_mutex;
     std::unique_ptr<Snapshotter>    snapshotter;
     std::atomic<int64_t>            last_snapshot_trigger_mono_ms{0};
-    std::unique_ptr<RTSPPuller>      puller;
+    std::unique_ptr<RTSPPuller>     puller;
     std::unique_ptr<RtspPublisher>  publisher;
     std::thread                     publish_thread;
     std::atomic<bool>               stop_flag{false};
@@ -61,13 +63,16 @@ public:
 
 private:
     void handleSocketConfig(const ::media_agent::AgentConfig& cfg);
-    void configLoop();
+    void mainLoop();
     void heartbeatLoop();
     void inferLoop(int idx);
     void publishLoop(const std::shared_ptr<StreamContext>& stream);
 
-    void applyConfigBatch(const std::map<std::string, StreamConfig>& desired_streams);
+    void applyConfigBatch(const std::map<int32_t, AgentConfig>& configs);
     std::shared_ptr<StreamContext> buildStreamContext(const StreamConfig& config);
+    void updateStreamRuntime(const std::shared_ptr<StreamContext>& stream,
+                             const StreamConfig& runtime_config);
+    void requestAsyncStopStream(const std::shared_ptr<StreamContext>& stream);
     void configureStreamRecorder(const std::shared_ptr<StreamContext>& stream,
                                  const std::vector<RtspStreamSpec>& specs);
     std::string triggerAlarmRecording(const std::shared_ptr<StreamContext>& stream,
@@ -96,8 +101,9 @@ private:
 
     std::mutex                   config_mutex_;
     std::condition_variable      config_cv_;
-    std::map<std::string, StreamConfig> pending_streams_;
+    std::map<int32_t, AgentConfig> configs_;
     bool                         has_pending_config_ = false;
+    std::vector<std::shared_ptr<StreamContext>> pending_stop_streams_;
 
     std::mutex                   streams_mutex_;
     std::map<std::string, std::shared_ptr<StreamContext>> streams_;

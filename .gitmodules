@@ -1,3 +1,10 @@
 [submodule "third_party/protocol"]
 	path = third_party/protocol
-	url = http://192.168.88.91:3000/chenhaibo/protocol.git
+	url = http://192.168.88.91:3000/cdky/protocol.git
+[submodule "third_party/edgeDeploy"]
+	path = third_party/edgeDeploy
+	url = http://192.168.88.91:3000/zhaosong/edgeDeploy.git
+[submodule "third_party/algorithm"]
+       path = third_party/algorithm
+       url = http://192.168.88.91:3000/wangzhongju/algorithm.git
+

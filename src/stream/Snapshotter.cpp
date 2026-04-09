@@ -293,10 +293,10 @@ void Snapshotter::drawBoxes(const std::vector<DetectionObject>& objects) {
         const auto& box = object.bbox();
         const float half_width = box.width() * 0.5F;
         const float half_height = box.height() * 0.5F;
-        const int left = clampCoord(static_cast<int>((box.x() - half_width) * width), 0, width - 1);
-        const int top = clampCoord(static_cast<int>((box.y() - half_height) * height), 0, height - 1);
-        const int right = clampCoord(static_cast<int>((box.x() + half_width) * width), 0, width - 1);
-        const int bottom = clampCoord(static_cast<int>((box.y() + half_height) * height), 0, height - 1);
+        const int left = clampCoord(static_cast<int>((box.cx() - half_width) * width), 0, width - 1);
+        const int top = clampCoord(static_cast<int>((box.cy() - half_height) * height), 0, height - 1);
+        const int right = clampCoord(static_cast<int>((box.cx() + half_width) * width), 0, width - 1);
+        const int bottom = clampCoord(static_cast<int>((box.cy() + half_height) * height), 0, height - 1);
         if (right <= left || bottom <= top) {
             continue;
         }

@@ -1,0 +1,9 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: media-agent
+Source: https://example.com/media-agent
+
+Files: *
+Copyright: 2026 haibo.chen
+License: Proprietary
+ This package is distributed under proprietary terms.
+ Replace this file with your actual license text before release.

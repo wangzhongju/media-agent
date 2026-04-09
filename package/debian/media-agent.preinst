@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    install|upgrade)
+        echo "[media-agent] preinst: $1"
+        ;;
+    *)
+        ;;
+esac
+
+exit 0

@@ -3,6 +3,8 @@
 #include "common/Time.h"
 #include "common/Uuid.h"
 
+#include <algorithm>
+
 namespace media_agent {
 
 namespace {
@@ -25,19 +27,24 @@ std::string serializeEnvelope(Envelope env) {
 
 AlarmInfo buildAlarmInfo(const std::string& stream_id,
                          const AlgorithmConfig& detector_cfg,
-                         const DetectionObject& target,
+                         const std::vector<DetectionObject>& targets,
                          const std::string& snapshot_name,
                          const std::string& record_name) {
     AlarmInfo alarm;
     alarm.set_alarm_id(generateUuidV4());
     alarm.set_stream_id(stream_id);
     alarm.set_timestamp_ms(systemNowMs());
-    alarm.set_alarm_type(detector_cfg.algorithm_id().empty()
-        ? DetectionType_Name(target.type())
+    const DetectionObject* primary_target = targets.empty() ? nullptr : &targets.front();
+    alarm.set_algorithm_id(detector_cfg.algorithm_id().empty() && primary_target != nullptr
+        ? primary_target->class_name()
         : detector_cfg.algorithm_id());
     alarm.set_level(detector_cfg.alarm_level());
-    alarm.set_confidence(target.confidence());
-    alarm.mutable_target()->CopyFrom(target);
+    float max_confidence = 0.0f;
+    for (const auto& target : targets) {
+        max_confidence = std::max(max_confidence, target.confidence());
+        alarm.add_target()->CopyFrom(target);
+    }
+    alarm.set_confidence(max_confidence);
     alarm.set_snapshot_name(snapshot_name);
     alarm.set_record_name(record_name);
     return alarm;

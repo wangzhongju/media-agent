@@ -27,15 +27,13 @@ public:
                    const std::string& output_url,
                    const std::vector<RtspStreamSpec>& input_streams);
 
-    bool writePacket(const EncodedPacket& packet,
-                     const std::shared_ptr<AVPacket>& packet_override = nullptr);
+    bool writePacket(const AVPacket& packet);
 
     void close();
 
 private:
     bool openLocked();
-    bool writePacketLocked(const EncodedPacket& packet,
-                           const std::shared_ptr<AVPacket>& source_packet);
+    bool writePacketLocked(const AVPacket& packet);
     void closeLocked();
 
     std::mutex mutex_;

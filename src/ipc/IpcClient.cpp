@@ -73,6 +73,17 @@ void IpcClient::handleConfig(const ::media_agent::AgentConfig& cfg) {
                      j, algo.algorithm_id(), algo.model_path(), algo.threshold(),
                      algo.start_date(), algo.end_date());
         }
+        if (stream.has_tracker()) {
+            const auto& tracker = stream.tracker();
+            LOG_INFO("[IpcClient]     tracker enabled={} type={} min={} high={} iou={} age={} init={}",
+                     tracker.enabled(),
+                     tracker.tracker_type(),
+                     tracker.min_thresh(),
+                     tracker.high_thresh(),
+                     tracker.max_iou_distance(),
+                     tracker.max_age(),
+                     tracker.n_init());
+        }
     }
 
     if (config_cb_) {
