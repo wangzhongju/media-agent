@@ -1,1 +1,5 @@
 build/
+data/
+log/
+test_output/
+proto_py*
