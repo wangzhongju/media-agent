@@ -519,8 +519,6 @@ void Pipeline::inferLoop(int idx) {
                     stream->detector_runtime->detector->detect(*task.frame,
                                                                stream->detector_runtime->config);
 
-                const auto alarm_config = selectAlarmConfig(stream->detector_runtime->config,
-                                                            inference_result.algorithm_id);
                 task.buffer->markInferenceDone(inference_result);
                 task.buffer->updateCachedInferenceResult(inference_result);
                 Statistics::instance().incInferFrame(task.stream_id);
@@ -529,27 +527,73 @@ void Pipeline::inferLoop(int idx) {
                 std::string record_name;
                 std::string snapshot_name;
                 const int64_t now_mono_ms = steadyNowMs();
-                if (!inference_result.alarm_objects.empty()) {
+                const bool event_mode_enabled = inference_result.event_judge_applied;
+                const bool has_event_alarms = !inference_result.event_alarms.empty();
+                const bool has_object_alarms = !inference_result.alarm_objects.empty();
+                const bool has_any_alarm = event_mode_enabled
+                                               ? has_event_alarms
+                                               : (has_event_alarms || has_object_alarms);
+
+                std::vector<DetectionObject> snapshot_objects;
+                if (has_event_alarms) {
+                    for (const auto& event_alarm : inference_result.event_alarms) {
+                        snapshot_objects.insert(snapshot_objects.end(),
+                                                event_alarm.objects.begin(),
+                                                event_alarm.objects.end());
+                    }
+                } else if (!event_mode_enabled) {
+                    snapshot_objects = inference_result.alarm_objects;
+                }
+
+                if (has_any_alarm) {
                     record_name = triggerAlarmRecording(stream, now_mono_ms);
+                }
+                if (!snapshot_objects.empty()) {
                     snapshot_name = triggerAlarmSnapshot(stream,
                                                          now_mono_ms,
                                                          *task.frame,
-                                                         inference_result.alarm_objects);
+                                                         snapshot_objects);
                 }
 
-                if (ipc_ && !inference_result.alarm_objects.empty()) {
-                    std::map<uint32_t, std::vector<DetectionObject>> grouped_alarm_objects;
-                    for (const auto& target : inference_result.alarm_objects) {
-                        grouped_alarm_objects[target.class_id()].push_back(target);
-                    }
+                if (ipc_ && has_any_alarm) {
+                    if (event_mode_enabled) {
+                        for (const auto& event_alarm : inference_result.event_alarms) {
+                            const auto event_alarm_config = selectAlarmConfig(stream->detector_runtime->config,
+                                                                              event_alarm.event_name);
+                            ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
+                                                           event_alarm_config,
+                                                           event_alarm.objects,
+                                                           snapshot_name,
+                                                           record_name,
+                                                           event_alarm.description));
+                        }
+                    } else if (has_event_alarms) {
+                        for (const auto& event_alarm : inference_result.event_alarms) {
+                            const auto event_alarm_config = selectAlarmConfig(stream->detector_runtime->config,
+                                                                              event_alarm.event_name);
+                            ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
+                                                           event_alarm_config,
+                                                           event_alarm.objects,
+                                                           snapshot_name,
+                                                           record_name,
+                                                           event_alarm.description));
+                        }
+                    } else {
+                        const auto alarm_config = selectAlarmConfig(stream->detector_runtime->config,
+                                                                    inference_result.algorithm_id);
+                        std::map<uint32_t, std::vector<DetectionObject>> grouped_alarm_objects;
+                        for (const auto& target : inference_result.alarm_objects) {
+                            grouped_alarm_objects[target.class_id()].push_back(target);
+                        }
 
-                    for (const auto& [class_id, grouped_targets] : grouped_alarm_objects) {
-                        (void)class_id;
-                        ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
-                                                      alarm_config,
-                                                      grouped_targets,
-                                                      snapshot_name,
-                                                      record_name));
+                        for (const auto& [class_id, grouped_targets] : grouped_alarm_objects) {
+                            (void)class_id;
+                            ipc_->pushAlarm(buildAlarmInfo(task.frame->stream_id,
+                                                           alarm_config,
+                                                           grouped_targets,
+                                                           snapshot_name,
+                                                           record_name));
+                        }
                     }
                 }
                 inference_ok = true;

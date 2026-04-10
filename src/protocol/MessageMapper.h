@@ -11,7 +11,8 @@ AlarmInfo buildAlarmInfo(const std::string& stream_id,
                          const AlgorithmConfig& detector_cfg,
                          const std::vector<DetectionObject>& targets,
                          const std::string& snapshot_name,
-                         const std::string& record_name);
+                         const std::string& record_name,
+                         const std::string& description = "");
 
 HeartBeat buildHeartbeat(const std::string& agent_id,
                          int stream_count,

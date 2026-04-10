@@ -29,7 +29,8 @@ AlarmInfo buildAlarmInfo(const std::string& stream_id,
                          const AlgorithmConfig& detector_cfg,
                          const std::vector<DetectionObject>& targets,
                          const std::string& snapshot_name,
-                         const std::string& record_name) {
+                         const std::string& record_name,
+                         const std::string& description) {
     AlarmInfo alarm;
     alarm.set_alarm_id(generateUuidV4());
     alarm.set_stream_id(stream_id);
@@ -47,6 +48,7 @@ AlarmInfo buildAlarmInfo(const std::string& stream_id,
     alarm.set_confidence(max_confidence);
     alarm.set_snapshot_name(snapshot_name);
     alarm.set_record_name(record_name);
+    alarm.set_description(description);
     return alarm;
 }
 

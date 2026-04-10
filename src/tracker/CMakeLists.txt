@@ -8,7 +8,6 @@ file(GLOB IPC_SRCS CONFIGURE_DEPENDS      "ipc/*.cpp")
 file(GLOB PIPELINE_SRCS CONFIGURE_DEPENDS "pipeline/*.cpp")
 file(GLOB PROTOCOL_SRCS CONFIGURE_DEPENDS "protocol/*.cpp")
 file(GLOB TRACKER_SRCS CONFIGURE_DEPENDS  "tracker/*.cpp")
-file(GLOB EVENT_SRCS CONFIGURE_DEPENDS    "event/*.cpp")
 
 list(FILTER RTSP_SRCS EXCLUDE REGEX ".*/RgaConverter\\.cpp$")
 
@@ -22,7 +21,6 @@ add_executable(media_agent
     ${PIPELINE_SRCS}
     ${PROTOCOL_SRCS}
     ${TRACKER_SRCS}
-    ${EVENT_SRCS}
     $<TARGET_OBJECTS:proto_objects>   # 由根 CMakeLists 的 proto_objects OBJECT 库提供
 )
 
@@ -63,9 +61,6 @@ target_link_libraries(media_agent PRIVATE
 
     # byteTrack
     media_agent_bytetrack
-
-    # event
-    media_agent_eventedge
 
     # 系统库
     pthread

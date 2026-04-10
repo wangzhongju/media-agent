@@ -1,0 +1,332 @@
+﻿# =============================================================================
+# EventEdge 配置文件（仅保留事件判定配置）
+# 与 eventElement 的 event_detectors 段保持同格式与注释。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 事件检测器配置（所有事件默认启用，通过 deviceModel 动态判断）
+# -----------------------------------------------------------------------------
+event_detectors:
+  
+  # ---------------------------------------------------------------------------
+  # 1. 区域入侵事件
+  # deviceModel 标签：area-intrusion
+  # ---------------------------------------------------------------------------
+  area-intrusion:
+    enabled: true                # 默认启用
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    # 检测标签列表
+    detect_labels:
+      - "person"
+      - "car"
+    
+    # 滑动窗口参数
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    # 标签描述
+    label_descriptions:
+      person:
+        english: "area-intrusion"
+        chinese: "人员闯入"
+      car:
+        english: "area-intrusion"
+        chinese: "车辆入侵"
+  
+  # ---------------------------------------------------------------------------
+  # 2. 烟火检测事件
+  # deviceModel 标签：smoke-detection
+  # ---------------------------------------------------------------------------
+  smoke-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "fire"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      fire:
+        english: "smoke-detection"
+        chinese: "烟火检测"
+  
+  # ---------------------------------------------------------------------------
+  # 3. 安全帽检测事件
+  # deviceModel 标签：helmet-detection
+  # ---------------------------------------------------------------------------
+  helmet-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "helmet"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      helmet:
+        english: "helmet-detection"
+        chinese: "安全帽检测"
+  
+  # ---------------------------------------------------------------------------
+  # 4. 反光衣检测事件
+  # deviceModel 标签：vest-detection
+  # ---------------------------------------------------------------------------
+  vest-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "vest"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      vest:
+        english: "vest-detection"
+        chinese: "反光衣检测"
+  
+  # ---------------------------------------------------------------------------
+  # 5. 口罩检测事件
+  # deviceModel 标签：mask-detection
+  # ---------------------------------------------------------------------------
+  mask-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "masked_face"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      masked_face:
+        english: "mask-detection"
+        chinese: "口罩检测"
+  
+  # ---------------------------------------------------------------------------
+  # 6. 吸烟检测事件
+  # deviceModel 标签：smoking-detection
+  # ---------------------------------------------------------------------------
+  smoking-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "smoking"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      smoking:
+        english: "smoking-detection"
+        chinese: "吸烟检测"
+  
+  # ---------------------------------------------------------------------------
+  # 7. 打电话检测事件
+  # deviceModel 标签：phone-detection
+  # ---------------------------------------------------------------------------
+  phone-detection:
+    enabled: true
+    event_type: "target_detection"
+    event_interval_ms: 60000
+    
+    detect_labels:
+      - "phone"
+    
+    target_required_time: 1.5
+    target_required_frame: 8
+    max_search_time: 3.0
+    
+    label_descriptions:
+      phone:
+        english: "phone-detection"
+        chinese: "打电话检测"
+  
+  # ---------------------------------------------------------------------------
+  # 8. 人员离岗事件（新增）
+  # deviceModel 标签：people-leave
+  # ---------------------------------------------------------------------------
+  people-leave:
+    enabled: true                # 默认启用
+    event_type: "person_leave"
+    event_interval_ms: 30000
+    
+    # ROI区域（归一化坐标 [0, 1]）
+    roi:
+      x: 0.3
+      y: 0.3
+      width: 0.4
+      height: 0.4
+    
+    # 离岗参数
+    leave_time_threshold: 10.0
+    target_label: "person"
+    confidence_threshold: 0.5
+    
+    # 激活时间段（可选）
+    active_time_ranges:
+      - start_hour: 8
+        start_minute: 0
+        end_hour: 12
+        end_minute: 0
+      - start_hour: 14
+        start_minute: 0
+        end_hour: 18
+        end_minute: 0
+    
+    # 标签描述
+    label_descriptions:
+      person:
+        english: "people-leave"
+        chinese: "人员离岗"
+  
+  # ---------------------------------------------------------------------------
+  # 9. 人群聚集事件（新增）
+  # deviceModel 标签：crowd-gather
+  # ---------------------------------------------------------------------------
+  crowd-gather:
+    enabled: true                # 默认启用
+    event_type: "crowd_gather"
+    event_interval_ms: 30000
+    
+    # 聚集参数
+    person_count_threshold: 5
+    duration_threshold: 3.0
+    target_label: "person"
+    confidence_threshold: 0.5
+    
+    # ROI配置（可选）
+    use_roi: false
+    roi:
+      x: 0.0
+      y: 0.0
+      width: 1.0
+      height: 1.0
+    
+    # 标签描述
+    label_descriptions:
+      person:
+        english: "crowd-gather"
+        chinese: "人群聚集"
+  
+  # ---------------------------------------------------------------------------
+  # 10. 人员奔跑事件（新增）
+  # deviceModel 标签：people-running
+  # ---------------------------------------------------------------------------
+  people-running:
+    enabled: true                # 默认启用
+    event_type: "person_running"
+    event_interval_ms: 20000
+    
+    # 奔跑参数
+    speed_threshold: 2.0
+    duration_threshold: 1.0
+    target_label: "person"
+    confidence_threshold: 0.5
+    pixel_to_meter_ratio: 0.01
+    
+    # 标签描述
+    label_descriptions:
+      person:
+        english: "people-running"
+        chinese: "人员奔跑"
+  
+  # ---------------------------------------------------------------------------
+  # 11. 车辆逆行事件（新增）
+  # deviceModel 标签：vehicle-reverse
+  # ---------------------------------------------------------------------------
+  vehicle-reverse:
+    enabled: true                # 默认启用
+    event_type: "vehicle_reverse"
+    event_interval_ms: 20000
+    
+    # 目标车辆类型
+    target_labels:
+      - "car"
+      - "truck"
+      - "bus"
+    
+    confidence_threshold: 0.5
+    
+    # 方向检测ROI
+    direction_roi:
+      x: 0.0
+      y: 0.4
+      width: 1.0
+      height: 0.2
+    
+    # 正常行驶方向
+    normal_direction: "left_to_right"
+    
+    # 逆行判定参数
+    reverse_threshold: 0.8
+    duration_threshold: 2.0
+    
+    # 标签描述
+    label_descriptions:
+      car:
+        english: "vehicle-reverse"
+        chinese: "车辆逆行"
+
+  # ---------------------------------------------------------------------------
+  # 12. 车辆违停事件（新增）
+  # deviceModel 标签：vehicle-parking
+  # ---------------------------------------------------------------------------
+  vehicle-parking:
+    enabled: true                # 默认启用
+    event_type: "vehicle_parking"
+    event_interval_ms: 30000
+    
+    # ROI区域（归一化坐标 [0, 1]）
+    roi:
+      x: 0.1
+      y: 0.1
+      width: 0.8
+      height: 0.8
+    
+    # 违停参数
+    parking_time_threshold: 8.0
+    target_labels:
+      - "car"
+      - "truck"
+      - "bus"
+    confidence_threshold: 0.5
+    
+    # 激活时间段（可选）
+    active_time_ranges:
+      - start_hour: 0
+        start_minute: 0
+        end_hour: 23
+        end_minute: 59
+    
+    # 标签描述
+    label_descriptions:
+      car:
+        english: "vehicle-parking"
+        chinese: "车辆违停"
+      truck:
+        english: "vehicle-parking"
+        chinese: "车辆违停"
+      bus:
+        english: "vehicle-parking"
+        chinese: "车辆违停"

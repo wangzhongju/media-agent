@@ -2,6 +2,7 @@
 
 #include "IDetector.h"
 #include "infer/edgeInfer.h"
+#include "event/IEventJudge.h"
 #include "tracker/ITracker.h"
 
 #include <cstdint>
@@ -78,6 +79,22 @@ private:
     mutable TrackerConfig             active_tracker_config_;
     mutable bool                      tracker_initialized_for_config_ = false;
     mutable std::unique_ptr<ITracker> tracker_;
+};
+
+class EventPostprocessStep : public IAlgoPostprocessStep {
+public:
+    void run(const FrameBundle& frame,
+             const StreamConfig& cfg,
+             const AlgoDetectContext& context,
+             const std::vector<object_result>& raw_results,
+             FrameInferenceResult& output) const override;
+
+private:
+    bool ensureEventJudgeLocked() const;
+
+    mutable std::mutex                  event_mutex_;
+    mutable std::unique_ptr<IEventJudge> event_judge_;
+    mutable bool                        event_judge_init_attempted_ = false;
 };
 
 class DeduplicateAlarmPostprocessStep : public IAlgoPostprocessStep {

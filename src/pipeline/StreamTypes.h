@@ -61,6 +61,12 @@ struct FrameBundle {
     InferState                 infer_state = InferState::Idle;
 };
 
+struct EventAlarmResult {
+    std::string                  event_name;
+    std::string                  description;
+    std::vector<DetectionObject> objects;
+};
+
 struct FrameInferenceResult {
     std::string                 stream_id;
     int64_t                     frame_id = -1;
@@ -68,6 +74,8 @@ struct FrameInferenceResult {
     std::string                 algorithm_id;
     std::vector<DetectionObject> objects;
     std::vector<DetectionObject> alarm_objects;
+    std::vector<EventAlarmResult> event_alarms;
+    bool                        event_judge_applied = false;
     int64_t                     infer_start_mono_ms = 0;
     int64_t                     infer_done_mono_ms = 0;
     int64_t                     expire_at_mono_ms = 0;

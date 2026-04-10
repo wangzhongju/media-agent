@@ -47,6 +47,7 @@ message(STATUS "EdgeDeploy added as subdirectory: ${EDGE_DEPLOY_SOURCE_DIR}")
 # ── 跟踪 ────────────────────────────────────────────────
 set(ALGORITHM_ROOT ${CMAKE_SOURCE_DIR}/third_party/algorithm)
 set(BYTETRACK_SUBMODULE_DIR ${ALGORITHM_ROOT}/byteTrack)
+set(EVENTEDGE_SUBMODULE_DIR ${ALGORITHM_ROOT}/eventEdge)
 
 if(NOT EXISTS ${BYTETRACK_SUBMODULE_DIR}/CMakeLists.txt)
     message(FATAL_ERROR "ByteTrack submodule NOT found: ${BYTETRACK_SUBMODULE_DIR}")
@@ -59,6 +60,18 @@ target_include_directories(media_agent_bytetrack PUBLIC
 )
 
 message(STATUS "ByteTrack added as submodule: ${BYTETRACK_SUBMODULE_DIR}")
+
+if(NOT EXISTS ${EVENTEDGE_SUBMODULE_DIR}/CMakeLists.txt)
+    message(FATAL_ERROR "EventEdge source NOT found: ${EVENTEDGE_SUBMODULE_DIR}")
+endif()
+
+add_subdirectory(${EVENTEDGE_SUBMODULE_DIR} third_party/algorithm/eventEdge)
+
+target_include_directories(media_agent_eventedge PUBLIC
+    ${EVENTEDGE_SUBMODULE_DIR}/include
+)
+
+message(STATUS "EventEdge added as submodule: ${EVENTEDGE_SUBMODULE_DIR}")
 
 # ── 第三方：FFmpeg ──
 find_package(PkgConfig REQUIRED)
@@ -74,6 +87,7 @@ find_package(MPP REQUIRED)
 
 # ── 第三方：Protobuf（结构化消息序列化）────────────────────
 find_package(Protobuf REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # ── 第三方：nlohmann/json（header-only，源码在 third_party）─
 add_library(nlohmann_json INTERFACE)
@@ -109,11 +123,11 @@ target_include_directories(proto_objects PUBLIC
 # ── 子模块 ────────────────────────────────────────────────
 add_subdirectory(src)
 
-set_target_properties(media_agent edgeDeploy media_agent_bytetrack es_bytetrack PROPERTIES
+set_target_properties(media_agent edgeDeploy media_agent_bytetrack media_agent_eventedge es_bytetrack PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/lib"
 )
 
-install(TARGETS edgeDeploy media_agent_bytetrack es_bytetrack
+install(TARGETS edgeDeploy media_agent_bytetrack media_agent_eventedge es_bytetrack
     LIBRARY DESTINATION lib
 )
 

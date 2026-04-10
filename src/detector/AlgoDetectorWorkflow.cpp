@@ -2,10 +2,14 @@
 
 #include "common/Logger.h"
 #include "common/Time.h"
+#include "event/EventFactory.h"
 #include "tracker/TrackerFactory.h"
 
 #include <algorithm>
+#include <cmath>
 #include <google/protobuf/util/message_differencer.h>
+#include <optional>
+#include <set>
 #include <utility>
 
 namespace media_agent {
@@ -60,6 +64,55 @@ int64_t getAlarmDedupWindowMs(const StreamConfig& cfg) {
     }
 
     return static_cast<int64_t>(cfg.alarm_dedup_interval_s()) * 1000;
+}
+
+float clampUnit(float value) {
+    return std::max(0.0F, std::min(1.0F, value));
+}
+
+std::optional<EventRoi> convertRoiOverride(const AlgorithmConfig& algorithm) {
+    for (const auto& roi : algorithm.rois()) {
+        EventRoi override_roi;
+        bool valid = false;
+
+        if (roi.has_rect()) {
+            const auto& rect = roi.rect();
+            override_roi.width = clampUnit(rect.width());
+            override_roi.height = clampUnit(rect.height());
+            override_roi.x = clampUnit(rect.cx() - override_roi.width * 0.5F);
+            override_roi.y = clampUnit(rect.cy() - override_roi.height * 0.5F);
+            valid = override_roi.width > 0.0F && override_roi.height > 0.0F;
+        } else if (roi.has_poly() && roi.poly().points_size() > 0) {
+            float min_x = 1.0F;
+            float min_y = 1.0F;
+            float max_x = 0.0F;
+            float max_y = 0.0F;
+            for (const auto& point : roi.poly().points()) {
+                min_x = std::min(min_x, clampUnit(point.x()));
+                min_y = std::min(min_y, clampUnit(point.y()));
+                max_x = std::max(max_x, clampUnit(point.x()));
+                max_y = std::max(max_y, clampUnit(point.y()));
+            }
+
+            override_roi.x = min_x;
+            override_roi.y = min_y;
+            override_roi.width = std::max(0.0F, max_x - min_x);
+            override_roi.height = std::max(0.0F, max_y - min_y);
+            valid = override_roi.width > 0.0F && override_roi.height > 0.0F;
+        }
+
+        if (valid) {
+            if (override_roi.x + override_roi.width > 1.0F) {
+                override_roi.width = std::max(0.0F, 1.0F - override_roi.x);
+            }
+            if (override_roi.y + override_roi.height > 1.0F) {
+                override_roi.height = std::max(0.0F, 1.0F - override_roi.y);
+            }
+            return override_roi;
+        }
+    }
+
+    return std::nullopt;
 }
 
 } // namespace
@@ -119,6 +172,8 @@ void FormatInferResultPostprocessStep::run(const FrameBundle& frame,
 
     output.objects.clear();
     output.alarm_objects.clear();
+    output.event_alarms.clear();
+    output.event_judge_applied = false;
     output.objects.reserve(raw_results.size());
     for (const auto& item : raw_results) {
         auto object = buildDetectionObject(item);
@@ -193,6 +248,91 @@ bool TrackingPostprocessStep::ensureTrackerLocked(const TrackerConfig& tracker_c
         return false;
     }
 
+    return true;
+}
+
+void EventPostprocessStep::run(const FrameBundle& frame,
+                               const StreamConfig& cfg,
+                               const AlgoDetectContext& context,
+                               const std::vector<object_result>& raw_results,
+                               FrameInferenceResult& output) const {
+    (void)raw_results;
+
+    output.event_alarms.clear();
+
+    std::set<std::string> unique_events;
+    std::vector<EventRequest> requests;
+    const auto use_active_algorithms = !context.active_algorithms.empty();
+    if (use_active_algorithms) {
+        requests.reserve(context.active_algorithms.size());
+    } else {
+        requests.reserve(static_cast<size_t>(cfg.algorithms_size()));
+    }
+
+    auto build_request = [&unique_events, &requests](const AlgorithmConfig& algorithm) {
+        if (algorithm.algorithm_id().empty()) {
+            return;
+        }
+        if (!unique_events.insert(algorithm.algorithm_id()).second) {
+            return;
+        }
+
+        EventRequest request;
+        request.event_name = algorithm.algorithm_id();
+        request.roi_override = convertRoiOverride(algorithm);
+        requests.push_back(std::move(request));
+    };
+
+    if (use_active_algorithms) {
+        for (const auto& algorithm : context.active_algorithms) {
+            build_request(algorithm);
+        }
+    } else {
+        for (const auto& algorithm : cfg.algorithms()) {
+            build_request(algorithm);
+        }
+    }
+
+    if (requests.empty()) {
+        return;
+    }
+
+    output.event_judge_applied = true;
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    if (!ensureEventJudgeLocked() || !event_judge_) {
+        return;
+    }
+
+    std::vector<EventAlarmResult> alarms;
+    if (event_judge_->process(frame, output.objects, requests, alarms) && !alarms.empty()) {
+        output.event_alarms = std::move(alarms);
+    }
+}
+
+bool EventPostprocessStep::ensureEventJudgeLocked() const {
+    if (event_judge_) {
+        return true;
+    }
+
+    if (event_judge_init_attempted_) {
+        return false;
+    }
+    event_judge_init_attempted_ = true;
+
+    event_judge_ = EventFactory::create();
+    if (!event_judge_) {
+        LOG_ERROR("[AlgoDetector] create event judge failed");
+        return false;
+    }
+
+    if (!event_judge_->init("")) {
+        LOG_ERROR("[AlgoDetector] init event judge failed");
+        event_judge_.reset();
+        return false;
+    }
+
+    LOG_INFO("[AlgoDetector] event judge initialized supported={}",
+             event_judge_->supportedEvents().size());
     return true;
 }
 
@@ -293,6 +433,7 @@ std::vector<std::unique_ptr<IAlgoPostprocessStep>> createDefaultPostprocessSteps
     std::vector<std::unique_ptr<IAlgoPostprocessStep>> steps;
     steps.push_back(std::make_unique<FormatInferResultPostprocessStep>());
     steps.push_back(std::make_unique<TrackingPostprocessStep>());
+    steps.push_back(std::make_unique<EventPostprocessStep>());
     steps.push_back(std::make_unique<DeduplicateAlarmPostprocessStep>());
     return steps;
 }
