@@ -7,6 +7,7 @@ add_library(es_eventedge STATIC
     src/event/vehicle_reverse_detector.cpp
     src/event/vehicle_parking_detector.cpp
 )
+set_target_properties(es_eventedge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(es_eventedge
     PUBLIC

@@ -46,32 +46,12 @@ message(STATUS "EdgeDeploy added as subdirectory: ${EDGE_DEPLOY_SOURCE_DIR}")
 
 # ── 跟踪 ────────────────────────────────────────────────
 set(ALGORITHM_ROOT ${CMAKE_SOURCE_DIR}/third_party/algorithm)
-set(BYTETRACK_SUBMODULE_DIR ${ALGORITHM_ROOT}/byteTrack)
-set(EVENTEDGE_SUBMODULE_DIR ${ALGORITHM_ROOT}/eventEdge)
-
-if(NOT EXISTS ${BYTETRACK_SUBMODULE_DIR}/CMakeLists.txt)
-    message(FATAL_ERROR "ByteTrack submodule NOT found: ${BYTETRACK_SUBMODULE_DIR}")
+if(NOT EXISTS ${ALGORITHM_ROOT}/CMakeLists.txt)
+    message(FATAL_ERROR "Algorithm root CMakeLists not found: ${ALGORITHM_ROOT}")
 endif()
 
-add_subdirectory(${BYTETRACK_SUBMODULE_DIR} third_party/algorithm/byteTrack)
-
-target_include_directories(media_agent_bytetrack PUBLIC
-    ${BYTETRACK_SUBMODULE_DIR}/include
-)
-
-message(STATUS "ByteTrack added as submodule: ${BYTETRACK_SUBMODULE_DIR}")
-
-if(NOT EXISTS ${EVENTEDGE_SUBMODULE_DIR}/CMakeLists.txt)
-    message(FATAL_ERROR "EventEdge source NOT found: ${EVENTEDGE_SUBMODULE_DIR}")
-endif()
-
-add_subdirectory(${EVENTEDGE_SUBMODULE_DIR} third_party/algorithm/eventEdge)
-
-target_include_directories(media_agent_eventedge PUBLIC
-    ${EVENTEDGE_SUBMODULE_DIR}/include
-)
-
-message(STATUS "EventEdge added as submodule: ${EVENTEDGE_SUBMODULE_DIR}")
+add_subdirectory(${ALGORITHM_ROOT} third_party/algorithm)
+message(STATUS "Algorithm root added: ${ALGORITHM_ROOT}")
 
 # ── 第三方：FFmpeg ──
 find_package(PkgConfig REQUIRED)
@@ -123,11 +103,11 @@ target_include_directories(proto_objects PUBLIC
 # ── 子模块 ────────────────────────────────────────────────
 add_subdirectory(src)
 
-set_target_properties(media_agent edgeDeploy media_agent_bytetrack media_agent_eventedge es_bytetrack PROPERTIES
+set_target_properties(media_agent edgeDeploy PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/lib"
 )
 
-install(TARGETS edgeDeploy media_agent_bytetrack media_agent_eventedge es_bytetrack
+install(TARGETS edgeDeploy
     LIBRARY DESTINATION lib
 )
 

@@ -22,7 +22,8 @@ else()
     message(FATAL_ERROR "Eigen3 not found! Please install libeigen3-dev")
 endif()
 
-add_library(es_bytetrack SHARED ${BYTETRACK_SOURCES})
+add_library(es_bytetrack STATIC ${BYTETRACK_SOURCES})
+set_target_properties(es_bytetrack PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(es_bytetrack
     PUBLIC

@@ -22,3 +22,7 @@ target_link_libraries(media_agent_bytetrack
 target_compile_features(media_agent_bytetrack PUBLIC cxx_std_17)
 
 add_library(media_agent::bytetrack ALIAS media_agent_bytetrack)
+
+if(COMMAND media_agent_register_algorithm_target)
+    media_agent_register_algorithm_target(media_agent_bytetrack)
+endif()

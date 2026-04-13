@@ -33,3 +33,6 @@ target_compile_features(media_agent_eventedge PUBLIC cxx_std_17)
 
 add_library(media_agent::eventedge ALIAS media_agent_eventedge)
 
+if(COMMAND media_agent_register_algorithm_target)
+    media_agent_register_algorithm_target(media_agent_eventedge)
+endif()
