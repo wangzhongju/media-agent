@@ -1,0 +1,43 @@
+# Normalize line endings for all text files in repository
+* text=auto eol=lf
+
+# Treat common binary files as binary to avoid accidental normalization
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.ico binary
+*.webp binary
+*.svgz binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.flac binary
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.mkv binary
+*.webm binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.rar binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.so binary
+*.a binary
+*.o binary
+*.obj binary
+*.dll binary
+*.exe binary
+*.bin binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary

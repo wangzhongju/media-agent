@@ -113,3 +113,24 @@ PLATFORM=linux/arm64 IMAGE_NAME=<registry>/media-agent:arm64 OUTPUT_MODE=push ./
 
 - This project uses `pkg-config` to resolve FFmpeg libs: `libavformat`, `libavcodec`, `libavutil`.
 - Additional platform dependencies (for example Rockchip MPP and protobuf) may be required depending on your environment.
+
+## Text File Convention (UTF-8 + LF)
+
+To keep behavior consistent across Windows/macOS/Linux, this repository enforces:
+
+- Encoding: UTF-8
+- Line ending: LF (`\n`)
+
+Implemented rules:
+
+- `.gitattributes`: normalize text files to LF in Git
+- `.editorconfig`: configure editors to save UTF-8 + LF
+- `scripts/check_text_format.py`: CI/local validation script
+- `.github/workflows/text-format-check.yml`: runs validation in PR/push
+
+Run local check:
+
+```bash
+python scripts/check_text_format.py
+```
+

@@ -1,0 +1,27 @@
+name: text-format-check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-text-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify UTF-8 and LF
+        run: python scripts/check_text_format.py

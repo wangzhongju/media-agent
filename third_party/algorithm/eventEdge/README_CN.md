@@ -1,4 +1,4 @@
-﻿# EventEdge 事件模块
+# EventEdge 事件模块
 
 ## 模块概览
 `third_party/algorithm/eventEdge` 是 `media-agent` 当前使用的独立事件判定模块。  
