@@ -16,7 +16,6 @@
 
 namespace {
 
-constexpr const char* kDefaultConfigPath = "third_party/algorithm/eventElement/Event.yaml";
 constexpr const char* kFallbackConfigPath = "third_party/algorithm/eventEdge/Event.yaml";
 
 float clampUnit(float value) {
@@ -44,7 +43,7 @@ std::string resolveConfigPath(const ma_event_config_t* config) {
     if (config && config->config_path && config->config_path[0] != '\0') {
         return std::string(config->config_path);
     }
-    return std::string(kDefaultConfigPath);
+    return std::string(kFallbackConfigPath);
 }
 
 std::string resolveEventDescription(const EventInfo& event_info) {

@@ -13,7 +13,7 @@ namespace media_agent {
 
 namespace {
 
-constexpr const char* kDefaultEventConfigPath = "third_party/algorithm/eventElement/Event.yaml";
+constexpr const char* kDefaultEventConfigPath = "third_party/algorithm/eventEdge/Event.yaml";
 
 int clampTrackerId(uint32_t object_id) {
     if (object_id > static_cast<uint32_t>(std::numeric_limits<int>::max())) {

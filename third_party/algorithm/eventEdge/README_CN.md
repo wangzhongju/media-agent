@@ -3,7 +3,7 @@
 ## 模块概览
 `third_party/algorithm/eventEdge` 是 `media-agent` 当前使用的独立事件判定模块。  
 该模块分为两层：
-- `event/`：事件判定核心算法层（从 `eventElement` 的 `event` 实现迁移并独立构建）。
+- `event/`：事件判定核心算法层。
 - `include/media_agent_event.h` + `src/MediaAgentEvent.cpp`：对外封装层，提供稳定的 C ABI 接口。
 
 当前设计目标：

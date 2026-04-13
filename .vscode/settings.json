@@ -4,5 +4,8 @@
     "dpkg": true,
     "cmake": true
   },
-  "C_Cpp.intelliSenseCachePath": "/mnt/data"
+  "C_Cpp.intelliSenseCachePath": "/mnt/data",
+  "files.associations": {
+    "xstring": "cpp"
+  }
 }
