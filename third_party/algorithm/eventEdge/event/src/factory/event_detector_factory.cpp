@@ -1,7 +1,7 @@
 #define PL_LOG_ID PL_LOG_OTHERS
 
 #include "event_detector_factory.h"
-#include "log.h"
+#include <spdlog/spdlog.h>
 #include <sstream>
 #include <algorithm>
 
@@ -20,7 +20,7 @@ std::unique_ptr<BaseEventDetector> EventDetectorFactory::createDetectorByTag(
     
     try {
         if (!config["event_detectors"]) {
-            app_error("EventDetectorFactory: no 'event_detectors' section in config\n");
+            spdlog::error("EventDetectorFactory: no 'event_detectors' section in config");
             return nullptr;
         }
         
@@ -28,7 +28,7 @@ std::unique_ptr<BaseEventDetector> EventDetectorFactory::createDetectorByTag(
         
         // 检查配置中是否有该标签
         if (!detectorsNode[tag]) {
-            app_debug("EventDetectorFactory: tag '%s' not found in config\n", tag.c_str());
+            spdlog::debug("EventDetectorFactory: tag '{}' not found in config", tag);
             return nullptr;
         }
         
@@ -36,7 +36,7 @@ std::unique_ptr<BaseEventDetector> EventDetectorFactory::createDetectorByTag(
         
         // 检查是否启用
         if (detectorConfig["enabled"] && !detectorConfig["enabled"].as<bool>()) {
-            app_debug("EventDetectorFactory: tag '%s' is disabled\n", tag.c_str());
+            spdlog::debug("EventDetectorFactory: tag '{}' is disabled", tag);
             return nullptr;
         }
         
@@ -60,13 +60,14 @@ std::unique_ptr<BaseEventDetector> EventDetectorFactory::createDetectorByTag(
         } else if (eventType == "vehicle_parking") {
             return createVehicleParkingDetector(tag, cameraId, detectorConfig);
         }else {
-            app_error("EventDetectorFactory: unknown event type '%s'\n", eventType.c_str());
+            spdlog::error("EventDetectorFactory: unknown event type '{}'", eventType);
             return nullptr;
         }
         
     } catch (const std::exception& e) {
-        app_error("EventDetectorFactory: failed to create detector for tag '%s': %s\n", 
-                 tag.c_str(), e.what());
+        spdlog::error("EventDetectorFactory: failed to create detector for tag '{}': {}",
+                      tag,
+                      e.what());
         return nullptr;
     }
 }

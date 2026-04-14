@@ -25,6 +25,7 @@ target_include_directories(es_eventedge
 target_link_libraries(es_eventedge
     PUBLIC
         ${EVENTEDGE_YAML_TARGET}
+        spdlog::spdlog
 )
 
 target_compile_features(es_eventedge PUBLIC cxx_std_17)

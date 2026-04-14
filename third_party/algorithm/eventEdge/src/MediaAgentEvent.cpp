@@ -1,8 +1,8 @@
 #include "media_agent_event.h"
 
 #include "event_detector_factory.h"
-#include "log.h"
 
+#include <spdlog/spdlog.h>
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -207,7 +207,7 @@ struct ma_event_handle_t {
             config = YAML::LoadFile(path);
             return true;
         } catch (const std::exception& ex) {
-            app_warn("load config failed path=%s err=%s\n", path.c_str(), ex.what());
+            spdlog::warn("load config failed path={} err={}", path, ex.what());
         }
 
         if (path != kFallbackConfigPath) {
@@ -216,7 +216,9 @@ struct ma_event_handle_t {
                 config_path = kFallbackConfigPath;
                 return true;
             } catch (const std::exception& ex) {
-                app_error("load fallback config failed path=%s err=%s\n", kFallbackConfigPath, ex.what());
+                spdlog::error("load fallback config failed path={} err={}",
+                              kFallbackConfigPath,
+                              ex.what());
             }
         }
 
@@ -257,7 +259,7 @@ struct ma_event_handle_t {
 
         auto detector = EventDetectorFactory::createDetectorByTag(event_name, camera_id, config);
         if (!detector) {
-            app_warn("event_name=%s not registered or disabled\n", event_name.c_str());
+            spdlog::warn("event_name={} not registered or disabled", event_name);
             return nullptr;
         }
 

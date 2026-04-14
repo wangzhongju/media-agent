@@ -190,7 +190,7 @@ cd /home/linaro/workspace/server_demo_test/py_driver
 
 ```bash
 docker run --rm -u 0 --network host \
-  -v /home/linaro/workspace/media-agent/py_driver:/w \
+  -v /home/linaro/workspace/server_demo_test/py_driver:/w \
   -w /w \
   --entrypoint bash media-agent:eventedge-verify-runtime \
   -lc 'set -e; \

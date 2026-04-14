@@ -39,6 +39,7 @@ target_link_libraries(${CUR_LIB}
     PRIVATE
         es_eventedge
         ${EVENTEDGE_YAML_TARGET}
+        spdlog::spdlog
         pthread
 )
 

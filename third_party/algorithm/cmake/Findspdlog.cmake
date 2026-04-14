@@ -35,7 +35,7 @@ set(SPDLOG_FOUND ${spdlog_FOUND})
 
 if(SPDLOG_FOUND)
     if(NOT TARGET spdlog AND NOT TARGET spdlog::spdlog)
-        add_library(spdlog INTERFACE IMPORTED)
+        add_library(spdlog INTERFACE IMPORTED GLOBAL)
         set_target_properties(spdlog PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "${SPDLOG_INCLUDE_DIR}"
         )
