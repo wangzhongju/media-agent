@@ -60,7 +60,7 @@ target_link_libraries(media_agent PRIVATE
     edgeDeploy
 
     # byteTrack
-    media_agent_bytetrack
+    cdky_track
 
     # 系统库
     pthread

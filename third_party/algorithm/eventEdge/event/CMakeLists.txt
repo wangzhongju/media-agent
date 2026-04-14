@@ -9,12 +9,22 @@ add_library(es_eventedge STATIC
 )
 set_target_properties(es_eventedge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+set(EVENTEDGE_YAML_TARGET yaml-cpp)
+if(TARGET yaml-cpp::yaml-cpp)
+    set(EVENTEDGE_YAML_TARGET yaml-cpp::yaml-cpp)
+endif()
+
 target_include_directories(es_eventedge
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include/event
         ${CMAKE_CURRENT_SOURCE_DIR}/include/factory
+)
+
+target_link_libraries(es_eventedge
+    PUBLIC
+        ${EVENTEDGE_YAML_TARGET}
 )
 
 target_compile_features(es_eventedge PUBLIC cxx_std_17)
